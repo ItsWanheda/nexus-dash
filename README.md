@@ -39,8 +39,8 @@ Unlike typical static dashboards, **NEXUS** leverages a **Python Backend** to pr
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/ItsWanheda/nexus-dashboard.git
-cd nexus-dashboard
+git clone https://github.com/ItsWanheda/nexus-dash.git
+cd nexus-dash
 ```
 ### 2. Install Dependencies
 ```bash
