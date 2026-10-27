@@ -14,9 +14,9 @@ function loadRecorderSettings() {
     const saved = JSON.parse(localStorage.getItem(RECORDER_ALERT_STORAGE_KEY) || '{}');
     const consecutive = Number(saved.consecutive);
     state.alertConfig = {
-      cpu: clamp(saved.cpu === undefined ? RECORDER_ALERT_DEFAULTS.cpu : saved.cpu),
-      ram: clamp(saved.ram === undefined ? RECORDER_ALERT_DEFAULTS.ram : saved.ram),
-      disk: clamp(saved.disk === undefined ? RECORDER_ALERT_DEFAULTS.disk : saved.disk),
+      cpu: Math.max(1, clamp(saved.cpu === undefined ? RECORDER_ALERT_DEFAULTS.cpu : saved.cpu)),
+      ram: Math.max(1, clamp(saved.ram === undefined ? RECORDER_ALERT_DEFAULTS.ram : saved.ram)),
+      disk: Math.max(1, clamp(saved.disk === undefined ? RECORDER_ALERT_DEFAULTS.disk : saved.disk)),
       consecutive: Math.max(1, Math.min(10,
         Number.isFinite(consecutive) && consecutive ? consecutive : RECORDER_ALERT_DEFAULTS.consecutive))
     };

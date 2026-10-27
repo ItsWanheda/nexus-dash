@@ -231,6 +231,13 @@ function renderContent() {
       '<div class="table-scroll"><table><thead><tr><th>PID</th><th>Process</th><th>CPU</th><th>Memory</th><th>Status</th><th>Action</th></tr></thead><tbody id="process-list"><tr><td colspan="6" class="table-message">Loading process snapshot…</td></tr></tbody></table></div><p class="table-note">Process snapshots are best-effort. Operating-system permissions can hide details or deny termination.</p></section>' +
       '<section class="panel" id="process-tree-view" hidden><div class="panel-heading"><div><span class="eyebrow">PROCESS RELATIONSHIPS</span><h3>Parent / child tree</h3></div><span id="process-tree-count" class="panel-tag">LOADING</span></div><p class="table-note">A bounded snapshot; inaccessible or very short-lived processes may be omitted. Process-tree view is observational.</p><div id="process-tree" class="process-tree"><p class="muted">Loading process relationships…</p></div></section>';
     state.processFilter = '';
+    const processListView = document.getElementById('process-list-view');
+    const processTreeView = document.getElementById('process-tree-view');
+    if (processListView) processListView.hidden = state.processView !== 'list';
+    if (processTreeView) processTreeView.hidden = state.processView !== 'tree';
+    document.querySelectorAll('[data-action="process-list-view"], [data-action="process-tree-view"]').forEach(function (button) {
+      button.setAttribute('aria-pressed', String(button.getAttribute('data-action') === 'process-' + state.processView + '-view'));
+    });
   } else if (state.tab === 'system') {
     main.innerHTML = '<section class="page-intro"><div><div class="eyebrow">MACHINE PROFILE / RUNTIME</div><h2>System core</h2><p>Details reported by the operating system running the backend.</p></div></section><div class="system-grid" id="system-details"><section class="panel"><p class="muted">Waiting for system telemetry…</p></section></div>';
     updateSystem();
@@ -479,6 +486,7 @@ function init() {
     const saved = localStorage.getItem('nexus-theme');
     if (saved === 'light' || saved === 'dark') state.theme = saved;
   } catch (_) {}
+  loadRecorderSettings();
   buildShell();
   addLog('INFO', 'NEXUS dashboard session started.');
   renderContent();

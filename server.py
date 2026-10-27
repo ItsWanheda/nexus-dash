@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import platform
+import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
@@ -216,7 +217,7 @@ def get_history(
         raise HTTPException(status_code=400, detail="Unsupported history window.")
     try:
         samples = TELEMETRY_STORE.get_history(window, limit)
-    except (OSError, RuntimeError, ValueError):
+    except (OSError, RuntimeError, ValueError, sqlite3.Error):
         LOGGER.exception("Unable to read telemetry history")
         raise HTTPException(status_code=503, detail="Telemetry history is temporarily unavailable.")
     return {"window": window, "count": len(samples), "samples": samples, "storage": "local-sqlite"}
@@ -235,7 +236,7 @@ def export_history(
         raise HTTPException(status_code=400, detail="Export format must be json or csv.")
     try:
         samples = TELEMETRY_STORE.get_history(window, limit)
-    except (OSError, RuntimeError, ValueError):
+    except (OSError, RuntimeError, ValueError, sqlite3.Error):
         LOGGER.exception("Unable to export telemetry history")
         raise HTTPException(status_code=503, detail="Telemetry history is temporarily unavailable.")
     suffix = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
