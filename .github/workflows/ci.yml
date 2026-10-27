@@ -32,8 +32,10 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Check frontend JavaScript syntax
-        run: node --check src/static/app.js
+        run: |
+          node --check src/static/app.js
+          node --check src/static/flight-recorder.js
       - name: Compile Python sources
-        run: python -m compileall -q server.py tests
+        run: python -m compileall -q server.py telemetry_store.py tests
       - name: Run tests
         run: python -m pytest -q

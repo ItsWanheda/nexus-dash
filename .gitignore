@@ -28,3 +28,12 @@ Thumbs.db
 .env.*
 !.env.example
 local_config.json
+
+# Local Flight Recorder data (never commit local telemetry)
+.nexus-dash/
+telemetry.sqlite3
+telemetry.sqlite3-wal
+telemetry.sqlite3-shm
+*.telemetry.json
+nexus-session-*.json
+nexus-session-*.csv

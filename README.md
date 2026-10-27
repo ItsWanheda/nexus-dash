@@ -1,143 +1,158 @@
-# NEXUS // CORE DASHBOARD
+# NEXUS-DASH
 
-A local-first, cyberpunk-inspired system monitoring dashboard built with **vanilla HTML/CSS/JavaScript** and a **Python FastAPI + psutil backend**. The UI has no JavaScript framework or package-manager build step.
+**A local-first system observability dashboard with a rolling Flight Recorder, process intelligence, historical charts, and configurable resource alerts.**
 
-> **Security model:** NEXUS is designed for local use. The API binds to loopback, checks browser origins, disables credentialed CORS, and provides a read-only diagnostic console instead of arbitrary shell execution.
+NEXUS-DASH combines a dependency-free vanilla JavaScript interface with a Python FastAPI + psutil backend. It is designed for inspecting one local machine, not as a public or multi-user monitoring service.
 
-## Features
+![NEXUS preview](src/img/Preview.png)
 
-- **Live host telemetry:** CPU utilisation and core counts, RAM, disk, network transfer totals, and estimated upload/download rates.
-- **Session charts:** CPU and memory samples collected while the page is open; no fabricated historical dataset.
-- **Process manager:** filter and inspect process snapshots. Termination is limited to current-user processes and protected PIDs are blocked.
-- **Read-only diagnostic console:** exact allowlisted commands such as `help`, `status`, `cpu`, `memory`, `uptime`, `hostname`, `platform`, `whoami`, `date`, and `python --version`. User input is never passed to a shell.
-- **System profile and session logs:** live OS/runtime information and truthful browser-session events.
-- **Responsive UI:** mobile navigation, focus states, dark/light theme preference, and reduced-motion support.
-- **Secure defaults and tests:** loopback-only startup, origin checks, bounded inputs, structured API errors, and CI tests.
+## What it does
 
-GPU memory metrics are optional and currently use NVIDIA NVML when the optional `nvidia-ml-py` package and compatible NVIDIA drivers are present. On other hardware, GPU telemetry is marked unavailable rather than displaying invented measurements.
+### Live system monitoring
+- CPU utilisation, logical/physical core counts, RAM use, system-volume use, network counters/rates, uptime, and host profile.
+- Optional NVIDIA GPU memory via NVML when compatible hardware, drivers, and the nvidia-ml-py package are available.
+- Unsupported GPU telemetry is explicitly unavailable; the interface does not invent readings.
+
+### System Flight Recorder
+- Local SQLite telemetry history that survives page reloads and browser restarts.
+- CPU, RAM, disk-use, network-counter, and available GPU-memory samples, recorded at a bounded interval.
+- Historical replay windows: 5 minutes, 15 minutes, 1 hour, 6 hours, and 24 hours.
+- Resource history charts and JSON/CSV export. JSON session export also includes browser-session events, resource alerts, alert settings, and the latest process snapshot.
+- Background recording continues while the local API is running, even when the dashboard tab is not open.
+
+### Process intelligence
+- Filterable process snapshot with CPU, memory, state, and guarded termination.
+- Parent/child process tree for understanding process relationships.
+- Tree snapshots are bounded and best-effort; permissions and short-lived processes can limit visibility.
+- Termination remains restricted to same-user processes and protected PIDs are rejected.
+
+### Configurable resource alerts
+- CPU, RAM, and system-volume threshold percentages.
+- Consecutive-sample requirement reduces one-off alert noise.
+- Optional browser desktop notifications require a user-initiated permission request.
+- Alert preferences are stored in browser local storage; active alert history is session-local.
+
+### Security and accessibility
+- Loopback-only API; browser origin allowlist; restrictive CORS; trusted-host validation.
+- Read-only diagnostic console with exact built-in commands instead of shell execution.
+- Bounded API input, structured errors, responsive navigation, keyboard focus states, and reduced-motion support.
+- No front-end framework, package-manager build step, external analytics, or telemetry upload.
 
 ## Stack
 
-| Component | Technology |
+| Layer | Technology |
 | --- | --- |
-| Frontend | HTML5, CSS Grid/Flexbox, vanilla JavaScript |
-| API | Python 3.10+, FastAPI, Uvicorn |
-| Host metrics | psutil |
-| Optional GPU adapter | `nvidia-ml-py` (NVIDIA only) |
-| Tests | pytest, FastAPI TestClient |
+| Frontend | HTML5, CSS, vanilla JavaScript |
+| Local API | Python 3.10+, FastAPI, Uvicorn |
+| OS telemetry | psutil |
+| Historical storage | SQLite, local filesystem only |
+| Optional GPU | nvidia-ml-py / NVIDIA NVML |
+| Tests | pytest, FastAPI TestClient, GitHub Actions |
 
-## Setup
+## Quick start
 
 ### 1. Clone and install
 
-```bash
-git clone https://github.com/ItsWanheda/nexus-dash.git
-cd nexus-dash
-python -m venv .venv
-```
+    git clone https://github.com/ItsWanheda/nexus-dash.git
+    cd nexus-dash
+    python -m venv .venv
 
 Activate the environment:
 
 **Windows PowerShell**
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
+
+    .\.venv\Scripts\Activate.ps1
 
 **Linux / macOS**
-```bash
-source .venv/bin/activate
-```
+
+    source .venv/bin/activate
 
 Install runtime dependencies:
 
-```bash
-python -m pip install -r requirements.txt
-```
+    python -m pip install -r requirements.txt
 
-### 2. Start the API
+### 2. Run the API
 
-In terminal 1, run:
+From the repository root:
 
-```bash
-python server.py
-```
+    python server.py
 
-The API listens on **127.0.0.1:8000**. Verify it at <http://127.0.0.1:8000/api/health>.
+The API binds to **127.0.0.1:8000**. Health check: <http://127.0.0.1:8000/api/health>.
 
-### 3. Serve the frontend
+### 3. Serve the UI
 
-In terminal 2, from the repository root:
+Open a second terminal in the repository root:
 
-```bash
-python -m http.server 5500 --bind 127.0.0.1
-```
+    python -m http.server 5500 --bind 127.0.0.1
 
-Open <http://127.0.0.1:5500>. Do not open `index.html` through a `file://` URL; serve it from the documented local origin so the API origin policy can apply.
+Open <http://127.0.0.1:5500>. Do not open index.html through a file:// URL; the UI should be served from an allowed local origin.
 
-### 4. Optional NVIDIA telemetry
+### 4. Optional NVIDIA GPU metrics
 
-For a compatible NVIDIA driver, install:
+    python -m pip install nvidia-ml-py
 
-```bash
-python -m pip install nvidia-ml-py
-```
+The dashboard remains usable without this optional dependency.
 
-The rest of the dashboard works without this optional package.
+## API reference
 
-## API
-
-| Method | Endpoint | Description |
+| Method | Endpoint | Purpose |
 | --- | --- | --- |
-| GET | `/api/health` | Local API health |
-| GET | `/api/stats` | CPU, RAM, disk, network, GPU and host data |
-| GET | `/api/processes?limit=100` | Process snapshot (limit 1–200) |
-| POST | `/api/process/kill` | Terminate an eligible process; JSON body: `{"pid": 1234}` |
-| POST | `/api/terminal` | Run one allowlisted diagnostic; JSON body: `{"command": "status"}` |
+| GET | /api/health | Local API health/version |
+| GET | /api/stats | Current CPU, RAM, disk, network, GPU, and host snapshot |
+| GET | /api/processes?limit=100 | Filterable process snapshot (limit 1–200) |
+| GET | /api/process-tree?limit=500 | Bounded parent/child tree (limit 1–1000) |
+| GET | /api/history?window=1h&limit=600 | Historical samples; windows: 5m, 15m, 1h, 6h, 24h |
+| GET | /api/history/export?format=json&window=24h&limit=2000 | Download historical samples as JSON or CSV |
+| POST | /api/process/kill | Request termination of an eligible PID; body: {"pid": 1234} |
+| POST | /api/terminal | Run an exact allowlisted diagnostic; body: {"command": "status"} |
 
-Interactive OpenAPI/Swagger documentation is disabled because this API is intended for local dashboard use rather than public service integration.
+Interactive OpenAPI/Swagger endpoints are intentionally disabled.
+
+## Local history, retention, and privacy
+
+By default, telemetry is stored in:
+
+- **Windows:** %USERPROFILE%\.nexus-dash\telemetry.sqlite3
+- **Linux/macOS:** ~/.nexus-dash/telemetry.sqlite3
+
+Set NEXUS_DATA_DIR before starting the API to choose a different local data directory. The recorder creates a private directory where filesystem permissions support it. It keeps at most 24 hours and 20,000 samples, whichever limit is reached first, and rate-limits persistent writes to approximately one sample every five seconds.
+
+Persistent samples contain resource metrics and a UTC timestamp. Hostname, OS username, executable paths, command lines, and process names are not written to the telemetry database. Process snapshots and browser event logs are collected separately for the live UI and are only included in an export when the user explicitly requests a session JSON export.
+
+To clear history, stop NEXUS and remove the telemetry.sqlite3, telemetry.sqlite3-wal, and telemetry.sqlite3-shm files from the data directory. Browser-local alert preferences can be removed by clearing site data for the local UI origin. See docs/FLIGHT_RECORDER.md for details.
 
 ## Tests
 
-```bash
-python -m pip install -r requirements-dev.txt
-python -m pytest -q
-```
+    python -m pip install -r requirements-dev.txt
+    python -m pytest -q
+    node --check src/static/flight-recorder.js
+    node --check src/static/app.js
+    python -m compileall -q server.py telemetry_store.py tests
 
-The GitHub Actions workflow compiles the Python sources and runs the tests on Python 3.10–3.13.
-
-## Security notes
-
-- **Do not expose port 8000 publicly.** Do not bind the API to `0.0.0.0`, add a port-forward, or put it behind a public reverse proxy.
-- The backend checks the client loopback address and rejects unapproved browser `Origin` values. Allowed frontend origins are limited to localhost ports 5500 and 5501; the API's own localhost origin is also allowed.
-- The terminal accepts exact built-in diagnostic commands only. It does not use `subprocess`, `shell=True`, `eval`, or arbitrary command execution.
-- Process termination can cause data loss. Confirm the target process and any unsaved work. Protected PIDs and processes not owned by the current user are rejected; operating-system permissions still apply.
-- Run the app as a standard user rather than an administrator/root account for routine monitoring.
-- This is **not** an authentication system or a multi-user remote monitoring service. Read [SECURITY.md](SECURITY.md) before changing its networking model.
+CI validates Python 3.10–3.13, frontend JavaScript syntax, Python compilation, and the test suite. Local manual checks across Windows, Linux, and macOS are still recommended for process visibility and permission-dependent behaviour.
 
 ## Project layout
 
-```text
-nexus-dash/
-├── .github/workflows/ci.yml
-├── src/static/app.js
-├── src/style/styles.css
-├── tests/test_server.py
-├── index.html
-├── server.py
-├── requirements.txt
-├── requirements-dev.txt
-├── SECURITY.md
-├── CHANGELOG.md
-└── README.md
-```
+    nexus-dash/
+    ├── .github/workflows/ci.yml
+    ├── docs/FLIGHT_RECORDER.md
+    ├── src/static/app.js
+    ├── src/static/flight-recorder.js
+    ├── src/style/styles.css
+    ├── tests/
+    ├── index.html
+    ├── server.py
+    ├── telemetry_store.py
+    ├── requirements.txt
+    ├── requirements-dev.txt
+    ├── SECURITY.md
+    ├── CHANGELOG.md
+    └── README.md
 
-## Roadmap
+## Security
 
-- Add opt-in local persistence for user-selected telemetry history.
-- Support platform-specific GPU adapters without reporting unsupported metrics as real data.
-- Expand process-permission tests on Windows, Linux and macOS.
-- Consider a local desktop packaging option after further security review.
+Read SECURITY.md before changing the networking model or process-control behaviour. Keep the API bound to loopback and run it as a standard user. Never expose port 8000 to the internet or a LAN.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See LICENSE.
