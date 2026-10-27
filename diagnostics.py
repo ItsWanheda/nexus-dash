@@ -202,6 +202,6 @@ def analyse_diagnostics(samples:list[dict[str,Any]],memory_growth:list[dict[str,
     else:summary=f"{len(findings)} finding(s) need review; highest severity is {findings[0]['severity']}. Recommendations are leads, not automatic fixes."
     return {"version":DIAGNOSTICS_VERSION,"generated_at":current.isoformat(),"window":window,"sample_count":len(cleaned),
       "event_source_status":event_source_status,"summary":summary,"findings":findings,"memory_growth":growth,"correlated_events":correlations[:20],
-      "limitations":["Resource thresholds indicate pressure, not root cause.","Process memory increase alone is not proof of a memory leak; compare repeatable workloads.",
+      "limitations":["Resource thresholds indicate pressure, not root cause.","Temporal correlation does not establish causation.","Process memory increase alone is not proof of a memory leak; compare repeatable workloads.",
         "OS crash/event visibility depends on platform, log availability, optional dependencies, and permissions.",
         "Process-memory history is held in memory only and resets when the API process restarts."]}
