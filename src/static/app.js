@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: '◈' },
   { id: 'processes', label: 'Processes', icon: '▤' },
   { id: 'analytics', label: 'Analytics', icon: '◉' },
+  { id: 'flight-recorder', label: 'Flight Recorder', icon: '◷' },
   { id: 'system', label: 'System Core', icon: '⌘' },
   { id: 'security', label: 'Security', icon: '⬡' },
   { id: 'terminal', label: 'Diagnostic Terminal', icon: '>_' },
@@ -13,8 +14,10 @@ const NAV_ITEMS = [
 const app = document.getElementById('app');
 const state = {
   tab: 'dashboard', stats: null, processes: [], history: [], logs: [],
-  theme: 'dark', connection: 'unknown', statsTimer: null, processTimer: null,
-  previousNetwork: null, networkRates: { sent: 0, received: 0 }, processFilter: ''
+  theme: 'dark', connection: 'unknown', statsTimer: null, processTimer: null, historyTimer: null,
+  previousNetwork: null, networkRates: { sent: 0, received: 0 }, processFilter: '',
+  recorderHistory: [], processTree: [], processView: 'list', alerts: [],
+  alertConfig: { cpu: 90, ram: 90, disk: 95, consecutive: 3 }, alertCounters: {}, alertLastFired: {}
 };
 
 function escapeHTML(value) {
@@ -120,6 +123,11 @@ function bindEvents() {
       renderProcessRows();
     }
   });
+  app.addEventListener('change', function (event) {
+    const target = event.target;
+    if (target && target.id === 'history-window') loadRecorderHistory();
+    if (target && ['alert-cpu', 'alert-ram', 'alert-disk', 'alert-consecutive'].includes(target.id)) saveRecorderSettings();
+  });
   app.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closeMenu();
     if (event.key === 'Enter' && event.target && event.target.id === 'terminal-input') {
@@ -147,7 +155,13 @@ function handleClick(event) {
   else if (action === 'terminal-clear') {
     const output = document.getElementById('terminal-output');
     if (output) output.replaceChildren();
-  } else if (action === 'process-refresh') loadProcesses();
+  } else if (action === 'process-refresh') {
+    if (state.processView === 'tree') loadProcessTree(); else loadProcesses();
+  } else if (action === 'process-tree-view') setProcessView('tree');
+  else if (action === 'process-list-view') setProcessView('list');
+  else if (action === 'export-session-json') exportRecorderSession('json');
+  else if (action === 'export-session-csv') exportRecorderSession('csv');
+  else if (action === 'enable-notifications') enableRecorderNotifications();
   else if (action === 'clear-logs') {
     state.logs = [];
     renderLogs();
@@ -208,10 +222,14 @@ function renderContent() {
       metricCard('SAMPLE WINDOW','analytics-window','—','analytics-window-meta','Approximate duration','time') +
       '</div><section class="panel"><div class="panel-heading"><div><span class="eyebrow">RECENT HISTORY</span><h3>CPU and memory</h3></div><span class="panel-tag">SESSION ONLY</span></div><div id="analytics-chart" class="history-chart"></div><div class="chart-legend"><span><i class="legend-dot cpu-legend"></i>CPU</span><span><i class="legend-dot ram-legend"></i>RAM</span></div></section>';
     updateAnalytics();
+  } else if (state.tab === 'flight-recorder') {
+    renderFlightRecorder();
   } else if (state.tab === 'processes') {
     main.innerHTML = '<section class="page-intro"><div><div class="eyebrow">PROCESS CONTROL / LOCAL USER</div><h2>Process manager</h2><p>Inspect process snapshots. Termination is restricted to processes owned by your current OS user; protected processes cannot be terminated.</p></div><button class="primary-button" type="button" data-action="process-refresh">↻ Refresh</button></section>' +
-      '<section class="panel"><div class="table-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="process-search" type="search" placeholder="Filter by PID, name, or status…" autocomplete="off"></label><span id="process-count" class="panel-tag">LOADING</span></div>' +
-      '<div class="table-scroll"><table><thead><tr><th>PID</th><th>Process</th><th>CPU</th><th>Memory</th><th>Status</th><th>Action</th></tr></thead><tbody id="process-list"><tr><td colspan="6" class="table-message">Loading process snapshot…</td></tr></tbody></table></div><p class="table-note">Process snapshots are best-effort. Operating-system permissions can hide details or deny termination.</p></section>';
+      '<div class="view-switch"><button type="button" class="secondary-button" data-action="process-list-view" aria-pressed="true">List view</button><button type="button" class="secondary-button" data-action="process-tree-view" aria-pressed="false">Process tree</button></div>' +
+      '<section class="panel" id="process-list-view"><div class="table-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="process-search" type="search" placeholder="Filter by PID, name, or status…" autocomplete="off"></label><span id="process-count" class="panel-tag">LOADING</span></div>' +
+      '<div class="table-scroll"><table><thead><tr><th>PID</th><th>Process</th><th>CPU</th><th>Memory</th><th>Status</th><th>Action</th></tr></thead><tbody id="process-list"><tr><td colspan="6" class="table-message">Loading process snapshot…</td></tr></tbody></table></div><p class="table-note">Process snapshots are best-effort. Operating-system permissions can hide details or deny termination.</p></section>' +
+      '<section class="panel" id="process-tree-view" hidden><div class="panel-heading"><div><span class="eyebrow">PROCESS RELATIONSHIPS</span><h3>Parent / child tree</h3></div><span id="process-tree-count" class="panel-tag">LOADING</span></div><p class="table-note">A bounded snapshot; inaccessible or very short-lived processes may be omitted. Process-tree view is observational.</p><div id="process-tree" class="process-tree"><p class="muted">Loading process relationships…</p></div></section>';
     state.processFilter = '';
   } else if (state.tab === 'system') {
     main.innerHTML = '<section class="page-intro"><div><div class="eyebrow">MACHINE PROFILE / RUNTIME</div><h2>System core</h2><p>Details reported by the operating system running the backend.</p></div></section><div class="system-grid" id="system-details"><section class="panel"><p class="muted">Waiting for system telemetry…</p></section></div>';
@@ -338,12 +356,14 @@ async function fetchStats() {
     }
     state.previousNetwork = { at: now, sent: data.network.sent_bytes, received: data.network.recv_bytes };
     state.stats = data;
+    evaluateRecorderAlerts(data);
     state.history.push({ at: now, cpu: data.cpu.percent, ram: data.ram.percent });
     state.history = state.history.slice(-30);
     setConnection(true);
     if (state.tab === 'dashboard') updateDashboard();
     else if (state.tab === 'analytics') updateAnalytics();
     else if (state.tab === 'system') updateSystem();
+    else if (state.tab === 'flight-recorder') renderRecorderAlerts();
   } catch (error) {
     setConnection(false, error.message + ' Start the backend with: python server.py');
     const chip = document.getElementById('api-state');
@@ -355,15 +375,23 @@ async function fetchStats() {
 function startPolling() {
   if (state.statsTimer) window.clearInterval(state.statsTimer);
   if (state.processTimer) window.clearInterval(state.processTimer);
+  if (state.historyTimer) window.clearInterval(state.historyTimer);
   state.statsTimer = null;
   state.processTimer = null;
-  if (['dashboard', 'analytics', 'system'].includes(state.tab)) {
+  state.historyTimer = null;
+  if (['dashboard', 'analytics', 'system', 'flight-recorder'].includes(state.tab)) {
     fetchStats();
     state.statsTimer = window.setInterval(fetchStats, POLL_INTERVAL_MS);
   }
+  if (state.tab === 'flight-recorder') {
+    loadRecorderHistory();
+    state.historyTimer = window.setInterval(loadRecorderHistory, 15000);
+  }
   if (state.tab === 'processes') {
-    loadProcesses();
-    state.processTimer = window.setInterval(loadProcesses, 10000);
+    if (state.processView === 'tree') loadProcessTree(); else loadProcesses();
+    state.processTimer = window.setInterval(function () {
+      if (state.processView === 'tree') loadProcessTree(); else loadProcesses();
+    }, 10000);
   }
 }
 async function loadProcesses() {
@@ -440,8 +468,11 @@ async function runTerminal() {
   finally { if (button) button.disabled = false; input.focus(); }
 }
 async function refreshCurrentView() {
-  if (['dashboard', 'analytics', 'system'].includes(state.tab)) await fetchStats();
-  if (state.tab === 'processes') await loadProcesses();
+  if (['dashboard', 'analytics', 'system', 'flight-recorder'].includes(state.tab)) await fetchStats();
+  if (state.tab === 'flight-recorder') await loadRecorderHistory();
+  if (state.tab === 'processes') {
+    if (state.processView === 'tree') await loadProcessTree(); else await loadProcesses();
+  }
 }
 function init() {
   try {
@@ -456,5 +487,6 @@ function init() {
 window.addEventListener('beforeunload', function () {
   if (state.statsTimer) window.clearInterval(state.statsTimer);
   if (state.processTimer) window.clearInterval(state.processTimer);
+  if (state.historyTimer) window.clearInterval(state.historyTimer);
 });
 init();
