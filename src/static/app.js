@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { id: 'processes', label: 'Processes', icon: '▤' },
   { id: 'analytics', label: 'Analytics', icon: '◉' },
   { id: 'flight-recorder', label: 'Flight Recorder', icon: '◷' },
+  { id: 'diagnostics', label: 'Bottleneck Detective', icon: '⌁' },
   { id: 'system', label: 'System Core', icon: '⌘' },
   { id: 'security', label: 'Security', icon: '⬡' },
   { id: 'terminal', label: 'Diagnostic Terminal', icon: '>_' },
@@ -14,9 +15,9 @@ const NAV_ITEMS = [
 const app = document.getElementById('app');
 const state = {
   tab: 'dashboard', stats: null, processes: [], history: [], logs: [],
-  theme: 'dark', connection: 'unknown', statsTimer: null, processTimer: null, historyTimer: null,
+  theme: 'dark', connection: 'unknown', statsTimer: null, processTimer: null, historyTimer: null, diagnosticsTimer: null,
   previousNetwork: null, networkRates: { sent: 0, received: 0 }, processFilter: '',
-  recorderHistory: [], processTree: [], processView: 'list', alerts: [],
+  recorderHistory: [], processTree: [], processView: 'list', alerts: [], diagnostics: null, diagnosticsWindow: '1h',
   alertConfig: { cpu: 90, ram: 90, disk: 95, consecutive: 3 }, alertCounters: {}, alertLastFired: {}
 };
 
@@ -102,7 +103,7 @@ function buildShell() {
       '<span class="brand-copy"><strong>NEXUS</strong><small>CORE / LOCAL MONITOR</small></span></a>' +
       '<div class="sidebar-label">WORKSPACE</div><nav><ul class="nav-menu">' + nav + '</ul></nav>' +
       '<div class="sidebar-bottom"><div class="local-badge"><span class="pulse-dot"></span><div><strong>LOCAL NODE</strong><small>Loopback mode</small></div></div>' +
-      '<p class="build-label">NEXUS CORE <span>v1.3</span></p></div></aside>' +
+      '<p class="build-label">NEXUS CORE <span>v2.0.0</span></p></div></aside>' +
     '<button class="sidebar-scrim" type="button" data-action="close-menu" aria-label="Close navigation"></button>' +
     '<section class="workspace"><header class="topbar"><div class="topbar-left">' +
       '<button class="icon-button menu-toggle" type="button" data-action="toggle-menu" aria-label="Toggle navigation" aria-expanded="false">☰</button>' +
@@ -126,6 +127,7 @@ function bindEvents() {
   app.addEventListener('change', function (event) {
     const target = event.target;
     if (target && target.id === 'history-window') loadRecorderHistory();
+    if (target && target.id === 'diagnostic-window') { state.diagnosticsWindow = ['15m', '1h', '6h', '24h'].includes(target.value) ? target.value : '1h'; loadDiagnostics(); }
     if (target && ['alert-cpu', 'alert-ram', 'alert-disk', 'alert-consecutive'].includes(target.id)) saveRecorderSettings();
   });
   app.addEventListener('keydown', function (event) {
@@ -162,6 +164,8 @@ function handleClick(event) {
   else if (action === 'export-session-json') exportRecorderSession('json');
   else if (action === 'export-session-csv') exportRecorderSession('csv');
   else if (action === 'enable-notifications') enableRecorderNotifications();
+  else if (action === 'diagnostic-refresh') loadDiagnostics();
+  else if (action === 'export-diagnostic-report') exportDiagnosticReport();
   else if (action === 'clear-logs') {
     state.logs = [];
     renderLogs();
@@ -224,6 +228,8 @@ function renderContent() {
     updateAnalytics();
   } else if (state.tab === 'flight-recorder') {
     renderFlightRecorder();
+  } else if (state.tab === 'diagnostics') {
+    renderDiagnostics();
   } else if (state.tab === 'processes') {
     main.innerHTML = '<section class="page-intro"><div><div class="eyebrow">PROCESS CONTROL / LOCAL USER</div><h2>Process manager</h2><p>Inspect process snapshots. Termination is restricted to processes owned by your current OS user; protected processes cannot be terminated.</p></div><button class="primary-button" type="button" data-action="process-refresh">↻ Refresh</button></section>' +
       '<div class="view-switch"><button type="button" class="secondary-button" data-action="process-list-view" aria-pressed="true">List view</button><button type="button" class="secondary-button" data-action="process-tree-view" aria-pressed="false">Process tree</button></div>' +
@@ -383,9 +389,11 @@ function startPolling() {
   if (state.statsTimer) window.clearInterval(state.statsTimer);
   if (state.processTimer) window.clearInterval(state.processTimer);
   if (state.historyTimer) window.clearInterval(state.historyTimer);
+  if (state.diagnosticsTimer) window.clearInterval(state.diagnosticsTimer);
   state.statsTimer = null;
   state.processTimer = null;
   state.historyTimer = null;
+  state.diagnosticsTimer = null;
   if (['dashboard', 'analytics', 'system', 'flight-recorder'].includes(state.tab)) {
     fetchStats();
     state.statsTimer = window.setInterval(fetchStats, POLL_INTERVAL_MS);
@@ -393,6 +401,10 @@ function startPolling() {
   if (state.tab === 'flight-recorder') {
     loadRecorderHistory();
     state.historyTimer = window.setInterval(loadRecorderHistory, 15000);
+  }
+  if (state.tab === 'diagnostics') {
+    loadDiagnostics();
+    state.diagnosticsTimer = window.setInterval(loadDiagnostics, 30000);
   }
   if (state.tab === 'processes') {
     if (state.processView === 'tree') loadProcessTree(); else loadProcesses();
@@ -477,6 +489,7 @@ async function runTerminal() {
 async function refreshCurrentView() {
   if (['dashboard', 'analytics', 'system', 'flight-recorder'].includes(state.tab)) await fetchStats();
   if (state.tab === 'flight-recorder') await loadRecorderHistory();
+  if (state.tab === 'diagnostics') await loadDiagnostics();
   if (state.tab === 'processes') {
     if (state.processView === 'tree') await loadProcessTree(); else await loadProcesses();
   }
@@ -496,5 +509,6 @@ window.addEventListener('beforeunload', function () {
   if (state.statsTimer) window.clearInterval(state.statsTimer);
   if (state.processTimer) window.clearInterval(state.processTimer);
   if (state.historyTimer) window.clearInterval(state.historyTimer);
+  if (state.diagnosticsTimer) window.clearInterval(state.diagnosticsTimer);
 });
 init();
