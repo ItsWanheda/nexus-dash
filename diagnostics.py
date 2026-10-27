@@ -96,7 +96,7 @@ def collect_os_events(window:str="1h",*,now:datetime|None=None)->dict[str,Any]:
                     for event in batch:
                         event_id=int(event.EventID)&0xFFFF;at=getattr(event,"TimeGenerated",None)
                         if event_id not in labels or at is None:continue
-                        at=at.replace(tzinfo=timezone.utc) if at.tzinfo is None else at.astimezone(timezone.utc)
+                        at=at.astimezone(timezone.utc)  # naive event-log times are interpreted in the host local timezone
                         if cutoff<=at<=current:
                             kind,summary=labels[event_id];events.append({"at":at.isoformat(),"source":"Windows Application log","kind":kind,"summary":summary,"event_id":event_id})
                 status="available"
@@ -119,7 +119,7 @@ def collect_os_events(window:str="1h",*,now:datetime|None=None)->dict[str,Any]:
                     match=re.match(r"^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})",line)
                     if not match:continue
                     try:
-                        at=datetime.strptime(match.group(1),"%b %d %H:%M:%S").replace(year=current.year,tzinfo=timezone.utc)
+                        at=datetime.strptime(match.group(1),"%b %d %H:%M:%S").replace(year=datetime.now().astimezone().year).astimezone(timezone.utc)
                         if at>current+timedelta(days=2):at=at.replace(year=at.year-1)
                     except ValueError:continue
                     if not cutoff<=at<=current:continue
