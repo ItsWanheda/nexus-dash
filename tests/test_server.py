@@ -54,3 +54,39 @@ def test_terminal_rejects_oversized_input():
 def test_unapproved_browser_origin_is_rejected():
     response = client.get("/api/health", headers={"Origin": "https://untrusted.example"})
     assert response.status_code == 403
+
+
+
+def test_history_endpoint_uses_supported_windows_and_rejects_unknown():
+    response = client.get("/api/history?window=1h&limit=10")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["window"] == "1h"
+    assert payload["storage"] == "local-sqlite"
+    assert payload["count"] == len(payload["samples"])
+    assert client.get("/api/history?window=forever").status_code == 400
+
+
+def test_history_export_supports_csv_and_json():
+    csv_response = client.get("/api/history/export?format=csv&window=24h&limit=20")
+    assert csv_response.status_code == 200
+    assert "text/csv" in csv_response.headers["content-type"]
+    assert "cpu_percent" in csv_response.text
+    json_response = client.get("/api/history/export?format=json&window=24h&limit=20")
+    assert json_response.status_code == 200
+    assert json_response.json()["sample_count"] == len(json_response.json()["samples"])
+    assert client.get("/api/history/export?format=exe").status_code == 400
+
+
+def test_process_tree_is_bounded_and_has_expected_shape():
+    response = client.get("/api/process-tree?limit=10")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] <= 10
+    assert isinstance(payload["items"], list)
+    assert isinstance(payload["truncated"], bool)
+    def visit(nodes):
+        for node in nodes:
+            assert {"pid", "ppid", "name", "cpu", "ram_mb", "status", "can_terminate", "children"} <= node.keys()
+            visit(node["children"])
+    visit(payload["items"])

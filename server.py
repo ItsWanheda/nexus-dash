@@ -1,11 +1,15 @@
 """Local-only NEXUS system telemetry API. The terminal is diagnostics-only."""
 from __future__ import annotations
 
+import csv
 import getpass
 import ipaddress
+import io
+import json
 import logging
 import os
 import platform
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -15,7 +19,9 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
+
+from telemetry_store import SAMPLE_FIELDS, WINDOW_SECONDS, TelemetryStore
 
 LOGGER = logging.getLogger("nexus")
 ALLOWED_ORIGINS = {
@@ -26,7 +32,11 @@ ALLOWED_ORIGINS = {
 PROTECTED_PIDS = {0, 1, 2, 3, 4, os.getpid(), os.getppid()}
 _NVML_INITIALIZED = False
 
-app = FastAPI(title="NEXUS Local System API", version="1.2.0",
+TELEMETRY_STORE = TelemetryStore()
+_RECORDER_STOP = threading.Event()
+_RECORDER_THREAD: threading.Thread | None = None
+
+app = FastAPI(title="NEXUS Local System API", version="1.3.0",
               docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]"])
 app.add_middleware(CORSMiddleware, allow_origins=sorted(ALLOWED_ORIGINS),
@@ -104,11 +114,11 @@ def _terminal(stdout: str, stderr: str = "", returncode: int = 0) -> dict[str, A
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "nexus-local-api", "version": "1.2.0"}
+    return {"status": "ok", "service": "nexus-local-api", "version": "1.3.0"}
 
 
-@app.get("/api/stats")
-def get_stats() -> dict[str, Any]:
+def _collect_stats() -> dict[str, Any]:
+    """Collect one fresh host snapshot without persisting identifying system fields."""
     try:
         memory = psutil.virtual_memory()
         net = psutil.net_io_counters()
@@ -139,6 +149,45 @@ def get_stats() -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="System metrics are temporarily unavailable.") from exc
 
 
+@app.get("/api/stats")
+def get_stats() -> dict[str, Any]:
+    payload = _collect_stats()
+    try:
+        TELEMETRY_STORE.record(payload)
+    except Exception:
+        # A history-storage issue must not make live telemetry unavailable.
+        LOGGER.exception("Telemetry sample could not be recorded")
+    return payload
+
+
+def _recorder_loop() -> None:
+    while not _RECORDER_STOP.is_set():
+        try:
+            TELEMETRY_STORE.record(_collect_stats())
+        except Exception:
+            LOGGER.exception("Background telemetry sample failed")
+        _RECORDER_STOP.wait(5.0)
+
+
+@app.on_event("startup")
+def start_recorder() -> None:
+    global _RECORDER_THREAD
+    if _RECORDER_THREAD and _RECORDER_THREAD.is_alive():
+        return
+    _RECORDER_STOP.clear()
+    _RECORDER_THREAD = threading.Thread(
+        target=_recorder_loop, name="nexus-telemetry-recorder", daemon=True
+    )
+    _RECORDER_THREAD.start()
+
+
+@app.on_event("shutdown")
+def stop_recorder() -> None:
+    _RECORDER_STOP.set()
+    if _RECORDER_THREAD and _RECORDER_THREAD.is_alive():
+        _RECORDER_THREAD.join(timeout=2.0)
+
+
 @app.get("/api/processes")
 def get_processes(limit: int = Query(default=100, ge=1, le=200)) -> dict[str, Any]:
     items = []
@@ -155,6 +204,103 @@ def get_processes(limit: int = Query(default=100, ge=1, le=200)) -> dict[str, An
     items.sort(key=lambda item: (item["cpu"], item["ram_mb"]), reverse=True)
     return {"items": items[:limit], "count": min(len(items), limit),
             "sampled_at": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/history")
+def get_history(
+    window: str = Query(default="1h"),
+    limit: int = Query(default=600, ge=1, le=2000),
+) -> dict[str, Any]:
+    """Return actual locally recorded samples for a bounded historical window."""
+    if window not in WINDOW_SECONDS:
+        raise HTTPException(status_code=400, detail="Unsupported history window.")
+    try:
+        samples = TELEMETRY_STORE.get_history(window, limit)
+    except (OSError, RuntimeError, ValueError):
+        LOGGER.exception("Unable to read telemetry history")
+        raise HTTPException(status_code=503, detail="Telemetry history is temporarily unavailable.")
+    return {"window": window, "count": len(samples), "samples": samples, "storage": "local-sqlite"}
+
+
+@app.get("/api/history/export")
+def export_history(
+    export_format: str = Query(default="json", alias="format"),
+    window: str = Query(default="24h"),
+    limit: int = Query(default=2000, ge=1, le=2000),
+) -> Response:
+    """Export bounded historical resource samples as JSON or CSV."""
+    if window not in WINDOW_SECONDS:
+        raise HTTPException(status_code=400, detail="Unsupported history window.")
+    if export_format not in {"json", "csv"}:
+        raise HTTPException(status_code=400, detail="Export format must be json or csv.")
+    try:
+        samples = TELEMETRY_STORE.get_history(window, limit)
+    except (OSError, RuntimeError, ValueError):
+        LOGGER.exception("Unable to export telemetry history")
+        raise HTTPException(status_code=503, detail="Telemetry history is temporarily unavailable.")
+    suffix = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    filename = f"nexus-telemetry-{suffix}.{export_format}"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    if export_format == "json":
+        body = json.dumps(
+            {"exported_at": datetime.now(timezone.utc).isoformat(),
+             "window": window, "sample_count": len(samples), "samples": samples},
+            indent=2, allow_nan=False,
+        )
+        return Response(content=body, media_type="application/json; charset=utf-8", headers=headers)
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=SAMPLE_FIELDS, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(samples)
+    return Response(content=output.getvalue(), media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.get("/api/process-tree")
+def get_process_tree(limit: int = Query(default=500, ge=1, le=1000)) -> dict[str, Any]:
+    """Return a bounded parent/child snapshot. No process path or command line is collected."""
+    nodes: dict[int, dict[str, Any]] = {}
+    truncated = False
+    fields = ["pid", "ppid", "name", "cpu_percent", "memory_info", "status"]
+    for process in psutil.process_iter(fields):
+        if len(nodes) >= limit:
+            truncated = True
+            break
+        try:
+            info = process.info
+            pid = int(info["pid"])
+            memory = info.get("memory_info")
+            nodes[pid] = {
+                "pid": pid,
+                "ppid": int(info.get("ppid") or 0),
+                "name": info.get("name") or "Unknown",
+                "cpu": round(float(info.get("cpu_percent") or 0), 1),
+                "ram_mb": round(memory.rss / (1024 ** 2), 1) if memory else 0.0,
+                "status": info.get("status") or "unknown",
+                "can_terminate": _can_terminate(process),
+                "children": [],
+            }
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, TypeError, ValueError):
+            continue
+    roots: list[dict[str, Any]] = []
+    for node in nodes.values():
+        parent = nodes.get(node["ppid"])
+        if parent and parent["pid"] != node["pid"]:
+            parent["children"].append(node)
+        else:
+            roots.append(node)
+
+    def sort_children(node: dict[str, Any]) -> None:
+        node["children"].sort(key=lambda child: (child["name"].casefold(), child["pid"]))
+        for child in node["children"]:
+            sort_children(child)
+
+    for root in roots:
+        sort_children(root)
+    roots.sort(key=lambda node: (node["name"].casefold(), node["pid"]))
+    return {
+        "items": roots, "count": len(nodes), "truncated": truncated,
+        "sampled_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @app.post("/api/process/kill")
