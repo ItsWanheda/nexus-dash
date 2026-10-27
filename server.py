@@ -23,6 +23,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse, Response
 
 from telemetry_store import SAMPLE_FIELDS, WINDOW_SECONDS, TelemetryStore
+from diagnostics import DIAGNOSTICS_VERSION, ProcessMemoryTracker, analyse_diagnostics, collect_os_events
 
 LOGGER = logging.getLogger("nexus")
 ALLOWED_ORIGINS = {
@@ -34,10 +35,11 @@ PROTECTED_PIDS = {0, 1, 2, 3, 4, os.getpid(), os.getppid()}
 _NVML_INITIALIZED = False
 
 TELEMETRY_STORE = TelemetryStore()
+PROCESS_MEMORY_TRACKER = ProcessMemoryTracker()
 _RECORDER_STOP = threading.Event()
 _RECORDER_THREAD: threading.Thread | None = None
 
-app = FastAPI(title="NEXUS Local System API", version="1.3.0",
+app = FastAPI(title="NEXUS Local System API", version=DIAGNOSTICS_VERSION,
               docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]"])
 app.add_middleware(CORSMiddleware, allow_origins=sorted(ALLOWED_ORIGINS),
@@ -115,7 +117,7 @@ def _terminal(stdout: str, stderr: str = "", returncode: int = 0) -> dict[str, A
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "nexus-local-api", "version": "1.3.0"}
+    return {"status": "ok", "service": "nexus-local-api", "version": DIAGNOSTICS_VERSION}
 
 
 def _collect_stats() -> dict[str, Any]:
@@ -162,9 +164,13 @@ def get_stats() -> dict[str, Any]:
 
 
 def _recorder_loop() -> None:
+    cycle = 0
     while not _RECORDER_STOP.is_set():
         try:
             TELEMETRY_STORE.record(_collect_stats())
+            cycle += 1
+            if cycle % 3 == 0:
+                PROCESS_MEMORY_TRACKER.sample()
         except Exception:
             LOGGER.exception("Background telemetry sample failed")
         _RECORDER_STOP.wait(5.0)
@@ -188,6 +194,51 @@ def stop_recorder() -> None:
     if _RECORDER_THREAD and _RECORDER_THREAD.is_alive():
         _RECORDER_THREAD.join(timeout=2.0)
 
+
+
+@app.get("/api/diagnostics")
+def get_diagnostics(window: str = Query(default="1h")) -> dict[str, Any]:
+    """Return bounded, evidence-based resource-pressure and event-correlation findings."""
+    if window not in WINDOW_SECONDS:
+        raise HTTPException(status_code=400, detail="Unsupported diagnostics window.")
+    try:
+        samples = TELEMETRY_STORE.get_history(window, 2000)
+        PROCESS_MEMORY_TRACKER.sample()
+        growth = PROCESS_MEMORY_TRACKER.get_growth(window)
+        event_result = collect_os_events(window)
+        return analyse_diagnostics(samples, growth, event_result["events"], window=window,
+                                   event_source_status=event_result["status"])
+    except (OSError, RuntimeError, ValueError, sqlite3.Error):
+        LOGGER.exception("Unable to analyse local diagnostics")
+        raise HTTPException(status_code=503, detail="Diagnostics are temporarily unavailable.")
+
+
+@app.get("/api/diagnostics/report")
+def export_diagnostics_report(window: str = Query(default="1h")) -> Response:
+    """Generate an explicitly requested, bounded JSON troubleshooting report."""
+    if window not in WINDOW_SECONDS:
+        raise HTTPException(status_code=400, detail="Unsupported diagnostics window.")
+    try:
+        samples = TELEMETRY_STORE.get_history(window, 2000)
+        PROCESS_MEMORY_TRACKER.sample()
+        growth = PROCESS_MEMORY_TRACKER.get_growth(window)
+        event_result = collect_os_events(window)
+        analysis = analyse_diagnostics(samples, growth, event_result["events"], window=window,
+                                       event_source_status=event_result["status"])
+    except (OSError, RuntimeError, ValueError, sqlite3.Error):
+        LOGGER.exception("Unable to create diagnostics report")
+        raise HTTPException(status_code=503, detail="Diagnostics report is temporarily unavailable.")
+    report = {
+        "application": "NEXUS-DASH", "version": DIAGNOSTICS_VERSION,
+        "report_type": "local-diagnostics", "generated_at": datetime.now(timezone.utc).isoformat(),
+        "window": window, "analysis": analysis, "telemetry_samples": samples,
+        "process_memory_growth": growth, "os_events": event_result,
+        "privacy_notice": "Generated on request. Includes local telemetry and may include process names, PIDs, and sanitized OS event metadata. Review before sharing.",
+    }
+    suffix = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return Response(content=json.dumps(report, indent=2, allow_nan=False),
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="nexus-diagnostics-{suffix}.json"'})
 
 @app.get("/api/processes")
 def get_processes(limit: int = Query(default=100, ge=1, le=200)) -> dict[str, Any]:

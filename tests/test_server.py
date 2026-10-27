@@ -90,3 +90,31 @@ def test_process_tree_is_bounded_and_has_expected_shape():
             assert {"pid", "ppid", "name", "cpu", "ram_mb", "status", "can_terminate", "children"} <= node.keys()
             visit(node["children"])
     visit(payload["items"])
+
+
+
+def test_diagnostics_endpoint_returns_evidence_based_report():
+    response = client.get("/api/diagnostics?window=1h")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["version"] == "2.0.0"
+    assert payload["window"] == "1h"
+    assert isinstance(payload["findings"], list)
+    assert isinstance(payload["memory_growth"], list)
+    assert "limitations" in payload
+
+
+def test_diagnostics_rejects_unsupported_window():
+    assert client.get("/api/diagnostics?window=forever").status_code == 400
+    assert client.get("/api/diagnostics/report?window=forever").status_code == 400
+
+
+def test_diagnostics_report_is_json_download():
+    response = client.get("/api/diagnostics/report?window=15m")
+    assert response.status_code == 200
+    assert "application/json" in response.headers["content-type"]
+    assert "attachment;" in response.headers["content-disposition"]
+    payload = response.json()
+    assert payload["report_type"] == "local-diagnostics"
+    assert payload["analysis"]["window"] == "15m"
+    assert "privacy_notice" in payload
