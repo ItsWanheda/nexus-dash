@@ -87,8 +87,9 @@ def _gpu_memory() -> dict[str, Any]:
 
 def _same_user(process: psutil.Process) -> bool:
     try:
-        actual, expected = process.username(), getpass.getuser()
-        return actual.casefold().split("\\")[-1] == expected.casefold().split("\\")[-1]
+        actual = process.username()
+        current_user = psutil.Process(os.getpid()).username()
+        return actual.casefold() == current_user.casefold()
     except (psutil.Error, OSError):
         return False
 
