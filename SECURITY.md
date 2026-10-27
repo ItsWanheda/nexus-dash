@@ -1,47 +1,42 @@
 # Security Policy
 
-> **Security is not a feature, it's a foundation.** 🛡️
+NEXUS-DASH is a **local system-monitoring tool**. It is not intended to be an internet-facing service, multi-user control plane, or general-purpose remote shell.
 
----
+## Supported versions
 
-## 🔒 Supported Versions
+| Version | Status |
+| --- | --- |
+| Latest main / active development branch | Expected to receive fixes |
+| Older snapshots | Upgrade to the latest supported code |
 
-We maintain strict version control to ensure security patches are delivered effectively.
+## Deployment constraints
 
-| Version | Supported | Status |
-| :--- | :---: | :--- |
-| **1.1.0** | ✅ | Active |
-| **1.0.0** | ❌ |
----
+- The bundled server must bind to 127.0.0.1, not 0.0.0.0.
+- Never expose port 8000 through a firewall rule, tunnel, reverse proxy, port-forward, or public hosting.
+- Browser origins are explicitly allowlisted; credentialed CORS is disabled and non-loopback clients are rejected.
+- The diagnostic terminal must remain limited to built-in read-only diagnostics. Do not reintroduce shell=True, arbitrary subprocess commands, command chaining, or eval.
+- Process termination can disrupt work. It rejects protected PIDs and processes owned by another user, but permissions and operating-system behaviour still matter.
+- Run under a standard user account rather than an administrator/root account for routine monitoring.
+- The loopback service does not implement user authentication; its trust boundary is the local machine.
 
-## 🚨 Reporting a Vulnerability
+## Telemetry privacy and retention
 
-We prioritize the security of our infrastructure and users above all else. If you believe you have discovered a vulnerability, we request that you **disclose it responsibly** by following our private disclosure process.
+- Historical data is stored locally in SQLite under ~/.nexus-dash/telemetry.sqlite3 or the directory chosen by NEXUS_DATA_DIR.
+- The database stores resource values and timestamps only; the recorder intentionally excludes hostname, OS username, process names, executable paths, and command lines.
+- Retention is bounded to 24 hours and 20,000 samples. Stored telemetry is not uploaded or sent to a third-party service.
+- Export files can include sensitive local resource and process/session information. Save and share them carefully; the JSON session export may contain browser session events and a process snapshot.
+- Browser desktop notifications are optional and require an explicit user action. Alert preferences remain in the browser's local storage.
 
-### ⚠️ Guidelines
-- **DO NOT** open a public issue, pull request, or discussion regarding a potential vulnerability.
-- **DO NOT** exploit the vulnerability on live systems.
-- **DO NOT** share details of the exploit with third parties until a patch is released.
+## Reporting a vulnerability
 
-### 📧 Disclosure Process
-Please report all findings directly via email:
+Do not publish working exploits or sensitive host data in a public issue. Use GitHub private vulnerability reporting if enabled, or contact the maintainer at wanheda.work@gmail.com with:
+- affected commit/version and environment,
+- reproduction steps or proof of concept,
+- impact and prerequisites,
+- suggested remediation, if known.
 
-**[wanheda.work@gmail.com](mailto:wanheda.work@gmail.com)**
+Only test against systems you own or have permission to administer. Reports will be acknowledged as soon as practical; this policy does not promise a fixed response SLA.
 
-*To ensure we handle your report efficiently, please include:*
-* **Proof of Concept (PoC)** or detailed reproduction steps
-* **Impact Analysis**
-* **Suggested Remediation** (optional)
+## Scope
 
----
-
-## ⏱️ Response SLA
-
-We treat security reports as high-priority incidents. You can expect the following response timeline:
-
-1.  **Acknowledgment**: Within **48 hours** of initial receipt.
-2.  **Analysis & Feedback**: Within **72 hours**, we will provide an initial assessment and our plan for remediation.
-
----
-*Thank you for helping keep this project secure for everyone.*
----
+In-scope issues include arbitrary command execution, unintended remote or cross-origin process control, sensitive information disclosure, unsafe defaults that expose the API, privilege escalation caused by this application, and telemetry retention/export defects. Visual defects and unsupported third-party driver behaviour are not security vulnerabilities by themselves.

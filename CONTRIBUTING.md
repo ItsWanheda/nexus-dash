@@ -1,80 +1,59 @@
-# Contributing to NEXUS Dashboard
+# Contributing to NEXUS-DASH
 
-Thank you for considering contributing to NEXUS Dashboard!  
-We welcome contributions from the community to make this cyberpunk dashboard even better.
+Thanks for contributing to NEXUS-DASH. The project is a local-first system monitoring application; contributions should preserve its security boundary and cyberpunk visual identity.
 
----
+## Development setup
 
-## How Can You Contribute?
+    git clone https://github.com/ItsWanheda/nexus-dash.git
+    cd nexus-dash
+    python -m venv .venv
 
-You can contribute in many ways:
-- Reporting Bugs :bug:
-- Suggesting New Features :sparkles:
-- Improving UI/UX :art:
-- Adding New Backend Endpoints (e.g., Disk I/O, Fan Speed)
-- Adding New Frontend Components (Charts, Widgets, Themes)
-- Fixing Typos & Documentation
-- Enhancing Responsiveness
-- Performance Improvements
+Activate the environment:
 
----
+**Windows PowerShell**
 
-## Development Setup
+    .\.venv\Scripts\Activate.ps1
 
-1. **Fork** the repository
-2. **Clone** your fork:
-```bash
-   git clone https://github.com/ItsWanheda/nexus-dashboard.git
-   cd nexus-dashboard
-```
-3. **Install Python Dependencies**:
-```bash
-   pip install psutil fastapi uvicorn
-   or
-   pip install -r requirements.txt
-```
-4. **Open** the project in your favorite code editor **(VS Code recommended)**
-5. **Start** the Backend:
-```bash
-   python server.py
-```
-6. **Open index.html in your browser (preferably via a local server like VS Code Live Server).**
+**Linux / macOS**
 
-## Pull Request Guidelines
-1. Create a new branch for your feature or fix:
-```bash
-git checkout -b feature/amazing-feature
-# or
-git checkout -b bugfix/issue-name
-```
-2. Make your changes and test thoroughly.
-3. Frontend Changes:
-* Keep the cyberpunk aesthetic consistent.
-* Use CSS custom properties (--var) where possible.
-* Ensure mobile responsiveness is maintained.
+    source .venv/bin/activate
 
-4. Backend Changes:
-* Ensure new endpoints are documented in the server.py docstrings.
-* Handle exceptions gracefully (e.g., if psutil fails).
-* Maintain CORS security best practices.
-5. *Commit your changes with clear messages:*
-```bash
-git commit -m "feat: add live memory usage widget"
-git commit -m "fix: resolve mobile sidebar overlap"
-```
-6. **Push to your branch and open a Pull Request to the main branch.**
+Install runtime and test dependencies:
 
-## Code Style
-* JavaScript: Use ES6+ features (let/const, arrow functions, async/await).
-* Python: Follow PEP 8 guidelines. Use type hints where appropriate.
-* CSS: Use BEM-like naming or consistent class naming. Use CSS Variables for theming.
+    python -m pip install -r requirements-dev.txt
 
-## Reporting Bugs
-**Please use the GitHub Issues tab to report bugs. Include:**
-* A clear title.
-* Steps to reproduce.
-* Expected vs. Actual behavior.
-* Screenshots if applicable.
+Start the API and UI in two terminals:
 
-## License
-***By contributing, you agree that your contributions will be licensed under the MIT License.***
+    python server.py
+    python -m http.server 5500 --bind 127.0.0.1
+
+Then open http://127.0.0.1:5500.
+
+## Engineering rules
+
+- Keep the API on loopback and preserve origin/host checks. Do not add public network access or credentialed CORS.
+- Never add arbitrary shell execution, shell command chaining, eval, or unrestricted process control.
+- Treat hardware counters as best-effort; unsupported metrics must be marked unavailable rather than fabricated.
+- Bound process snapshots, historical storage, request inputs, and export sizes.
+- Keep persistent telemetry privacy-conscious. Do not store hostnames, usernames, command lines, or executable paths in resource history without a separately reviewed design.
+- Use accessible controls, keyboard focus states, reduced-motion support, and responsive layouts; preserve the dark/neon-green visual direction.
+- Keep frontend JavaScript dependency-free unless a dependency is justified and documented.
+
+## Validation
+
+Run before opening a pull request:
+
+    node --check src/static/app.js
+    node --check src/static/flight-recorder.js
+    python -m compileall -q server.py telemetry_store.py tests
+    python -m pytest -q
+
+For UI changes, manually verify the relevant routes at desktop and mobile widths. For process features, test under a standard user account on supported operating systems and avoid terminating processes containing unsaved work.
+
+## Pull request checklist
+
+- [ ] Explain user-visible changes and security implications.
+- [ ] Add or update automated tests.
+- [ ] Update README.md, CHANGELOG.md, and relevant documentation.
+- [ ] Confirm no secrets, local database files, exports, or generated artefacts are committed.
+- [ ] Keep changes focused; do not combine unrelated refactors.
