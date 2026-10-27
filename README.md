@@ -1,10 +1,14 @@
 # NEXUS-DASH
 
-**A local-first system observability dashboard with a rolling Flight Recorder, process intelligence, historical charts, and configurable resource alerts.**
+**A local-first system observability and diagnostics platform with a Flight Recorder, process intelligence, Bottleneck Detective, memory-growth tracking, and crash/event correlation.**
 
-NEXUS-DASH combines a dependency-free vanilla JavaScript interface with a Python FastAPI + psutil backend. It is designed for inspecting one local machine, not as a public or multi-user monitoring service.
+NEXUS-DASH 2.0.0 combines a dependency-free vanilla JavaScript interface with a Python FastAPI + psutil backend. It records bounded local telemetry and analyses evidence to investigate performance problems; it does not claim automatic root-cause certainty. It is designed for inspecting one local machine, not as a public or multi-user monitoring service.
 
 ![NEXUS preview](src/img/Preview.png)
+
+## Version 2.0.0
+
+This major release adds evidence-based diagnostics. See [CHANGELOG.md](CHANGELOG.md) and [docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md).
 
 ## What it does
 
@@ -25,6 +29,14 @@ NEXUS-DASH combines a dependency-free vanilla JavaScript interface with a Python
 - Parent/child process tree for understanding process relationships.
 - Tree snapshots are bounded and best-effort; permissions and short-lived processes can limit visibility.
 - Termination remains restricted to same-user processes and protected PIDs are rejected.
+
+### Bottleneck Detective — diagnostics
+- Analyses real Flight Recorder samples for sustained CPU saturation, system-memory pressure, and system-volume capacity pressure.
+- Tracks process resident-memory growth in a bounded in-memory buffer and reports observed growth/rate; this is a lead, not proof of a leak.
+- Correlates available OS crash/hang indicators with nearby resource-pressure windows without asserting causation.
+- Provides evidence-backed findings with severity, observed values, confidence limits, and practical next steps.
+- Exports an on-demand JSON troubleshooting report with bounded telemetry, findings, process-memory candidates, and sanitised event metadata.
+- OS event collection is best-effort: Windows uses optional pywin32, Linux checks readable system logs, and macOS checks DiagnosticReports metadata.
 
 ### Configurable resource alerts
 - CPU, RAM, and system-volume threshold percentages.
@@ -101,6 +113,8 @@ The dashboard remains usable without this optional dependency.
 | GET | /api/stats | Current CPU, RAM, disk, network, GPU, and host snapshot |
 | GET | /api/processes?limit=100 | Filterable process snapshot (limit 1–200) |
 | GET | /api/process-tree?limit=500 | Bounded parent/child tree (limit 1–1000) |
+| GET | /api/diagnostics?window=1h | Evidence-based findings and event correlation |
+| GET | /api/diagnostics/report?window=1h | On-demand JSON troubleshooting report |
 | GET | /api/history?window=1h&limit=600 | Historical samples; windows: 5m, 15m, 1h, 6h, 24h |
 | GET | /api/history/export?format=json&window=24h&limit=2000 | Download historical samples as JSON or CSV |
 | POST | /api/process/kill | Request termination of an eligible PID; body: {"pid": 1234} |
@@ -119,15 +133,16 @@ Set NEXUS_DATA_DIR before starting the API to choose a different local data dire
 
 Persistent samples contain resource metrics and a UTC timestamp. Hostname, OS username, executable paths, command lines, and process names are not written to the telemetry database. Process snapshots and browser event logs are collected separately for the live UI and are only included in an export when the user explicitly requests a session JSON export.
 
-To clear history, stop NEXUS and remove the telemetry.sqlite3, telemetry.sqlite3-wal, and telemetry.sqlite3-shm files from the data directory. Browser-local alert preferences can be removed by clearing site data for the local UI origin. See docs/FLIGHT_RECORDER.md for details.
+To clear history, stop NEXUS and remove the telemetry.sqlite3, telemetry.sqlite3-wal, and telemetry.sqlite3-shm files from the data directory. Browser-local alert preferences can be removed by clearing site data for the local UI origin. See docs/FLIGHT_RECORDER.md for storage details and docs/DIAGNOSTICS.md for diagnostic thresholds, platform sources, limitations, and report contents.
 
 ## Tests
 
     python -m pip install -r requirements-dev.txt
     python -m pytest -q
     node --check src/static/flight-recorder.js
+    node --check src/static/diagnostics.js
     node --check src/static/app.js
-    python -m compileall -q server.py telemetry_store.py tests
+    python -m compileall -q server.py telemetry_store.py diagnostics.py tests
 
 CI validates Python 3.10–3.13, frontend JavaScript syntax, Python compilation, and the test suite. Local manual checks across Windows, Linux, and macOS are still recommended for process visibility and permission-dependent behaviour.
 
@@ -136,6 +151,9 @@ CI validates Python 3.10–3.13, frontend JavaScript syntax, Python compilation,
     nexus-dash/
     ├── .github/workflows/ci.yml
     ├── docs/FLIGHT_RECORDER.md
+    ├── docs/DIAGNOSTICS.md
+    ├── src/static/diagnostics.js
+    ├── diagnostics.py
     ├── src/static/app.js
     ├── src/static/flight-recorder.js
     ├── src/style/styles.css

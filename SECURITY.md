@@ -19,6 +19,13 @@ NEXUS-DASH is a **local system-monitoring tool**. It is not intended to be an in
 - Run under a standard user account rather than an administrator/root account for routine monitoring.
 - The loopback service does not implement user authentication; its trust boundary is the local machine.
 
+## Diagnostics and report privacy
+
+- Process-memory tracking uses a bounded in-memory buffer and resets when the API restarts; process names and PIDs are not written to the Flight Recorder database.
+- OS event collection is read-only and best-effort. Windows event-log access requires optional pywin32; Linux/macOS sources depend on readable local logs or report metadata.
+- Diagnostic report export is user-initiated and can contain telemetry, process names/PIDs, and sanitised event metadata. Review reports before sharing.
+- Findings are heuristic indicators. Resource pressure does not establish root cause, memory growth does not prove a leak, and timestamp correlation does not establish causation.
+
 ## Telemetry privacy and retention
 
 - Historical data is stored locally in SQLite under ~/.nexus-dash/telemetry.sqlite3 or the directory chosen by NEXUS_DATA_DIR.
@@ -39,4 +46,4 @@ Only test against systems you own or have permission to administer. Reports will
 
 ## Scope
 
-In-scope issues include arbitrary command execution, unintended remote or cross-origin process control, sensitive information disclosure, unsafe defaults that expose the API, privilege escalation caused by this application, and telemetry retention/export defects. Visual defects and unsupported third-party driver behaviour are not security vulnerabilities by themselves.
+In-scope issues include arbitrary command execution, unintended remote or cross-origin process control, sensitive information disclosure, unsafe defaults that expose the API, privilege escalation caused by this application, and telemetry retention/export defects, unbounded diagnostics collection, unsafe event-log parsing, and sensitive diagnostic reports. Visual defects and unsupported third-party driver behaviour are not security vulnerabilities by themselves.
