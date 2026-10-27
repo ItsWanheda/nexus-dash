@@ -99,7 +99,7 @@ function buildShell() {
       '<span class="brand-copy"><strong>NEXUS</strong><small>CORE / LOCAL MONITOR</small></span></a>' +
       '<div class="sidebar-label">WORKSPACE</div><nav><ul class="nav-menu">' + nav + '</ul></nav>' +
       '<div class="sidebar-bottom"><div class="local-badge"><span class="pulse-dot"></span><div><strong>LOCAL NODE</strong><small>Loopback mode</small></div></div>' +
-      '<p class="build-label">NEXUS CORE <span>v1.2</span></p></div></aside>' +
+      '<p class="build-label">NEXUS CORE <span>v1.3</span></p></div></aside>' +
     '<button class="sidebar-scrim" type="button" data-action="close-menu" aria-label="Close navigation"></button>' +
     '<section class="workspace"><header class="topbar"><div class="topbar-left">' +
       '<button class="icon-button menu-toggle" type="button" data-action="toggle-menu" aria-label="Toggle navigation" aria-expanded="false">☰</button>' +

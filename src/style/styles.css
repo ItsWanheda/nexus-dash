@@ -160,3 +160,58 @@ th, td { padding: 12px 10px; border-bottom: 1px solid var(--border); } tbody tr:
   .terminal-output { min-height:280px; padding:13px; font-size:11px; } .terminal-form { gap:7px; padding:11px; } .terminal-form .primary-button { padding:8px 10px; }
 }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; } }
+
+
+/* System Flight Recorder */
+.view-switch { display:flex; flex-wrap:wrap; gap:8px; margin:-3px 0 13px; }
+.view-switch button[aria-pressed="true"] { border-color:var(--green); color:var(--green); }
+#process-list-view[hidden], #process-tree-view[hidden] { display:none !important; }
+.flight-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+.flight-toolbar-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.flight-select { min-height:36px; padding:8px 10px; border:1px solid var(--border); border-radius:7px; color:var(--text); background:var(--surface); font:11px var(--mono); }
+.flight-chart-wrap { width:100%; overflow:hidden; }
+.flight-chart { display:block; width:100%; min-height:180px; }
+.flight-chart-grid { stroke:var(--border); stroke-width:1; stroke-dasharray:4 5; }
+.flight-chart-cpu { fill:none; stroke:var(--green); stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
+.flight-chart-ram { fill:none; stroke:#69a8ff; stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
+.flight-chart-disk { fill:none; stroke:#eab85e; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:6 4; }
+.chart-svg-label { fill:var(--muted); font:11px var(--mono); }
+.flight-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:14px; }
+.flight-summary .panel { padding:16px; }
+.flight-summary strong { display:block; margin-top:8px; font:500 22px var(--mono); color:var(--text); }
+.flight-summary span { color:var(--muted); font-size:10px; }
+.flight-legend { display:flex; gap:16px; flex-wrap:wrap; margin-top:12px; color:var(--muted); font-size:10px; }
+.flight-legend span { display:flex; align-items:center; gap:7px; }
+.flight-legend i { width:9px; height:3px; border-radius:3px; display:inline-block; }
+.flight-legend .cpu-legend { background:var(--green); }
+.flight-legend .ram-legend { background:#69a8ff; }
+.flight-legend .disk-legend { background:#eab85e; }
+.flight-columns { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(260px,1fr); gap:13px; align-items:start; }
+.alert-config { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.alert-config label { display:grid; gap:6px; color:var(--muted); font-size:10px; }
+.alert-config input { width:100%; min-width:0; padding:9px 10px; border:1px solid var(--border); border-radius:6px; color:var(--text); background:var(--bg); font:12px var(--mono); }
+.alert-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.alert-list { display:grid; gap:0; }
+.alert-row { display:grid; grid-template-columns:minmax(70px,auto) minmax(0,1fr); gap:8px 12px; padding:11px 0; border-bottom:1px solid var(--border); }
+.alert-row:last-child { border-bottom:0; }
+.alert-row time { color:var(--dim); font:9px var(--mono); }
+.alert-row strong { color:var(--amber); font-size:11px; }
+.alert-row p { grid-column:1/-1; margin:0; color:var(--muted); font-size:11px; }
+.process-tree { overflow:auto; }
+.process-tree-list, .process-tree-list ul { list-style:none; padding-left:17px; margin:0; }
+.process-tree-list { padding-left:0; }
+.process-tree-list li { position:relative; margin:4px 0; }
+.process-tree-list details { border-left:1px solid var(--border-strong); padding-left:10px; }
+.process-tree-list summary { cursor:pointer; padding:8px 10px; border-radius:6px; background:var(--surface-raised); color:var(--text); font-size:11px; }
+.process-tree-list summary:hover { background:var(--surface-hover); }
+.tree-meta { display:inline-flex; gap:10px; margin-left:8px; color:var(--muted); font:9px var(--mono); }
+.tree-pid { color:var(--green); font-family:var(--mono); }
+.tree-name { overflow-wrap:anywhere; }
+.tree-leaf { padding:8px 10px; border-left:1px solid var(--border); color:var(--text); font-size:11px; }
+@media (max-width:800px) { .flight-columns { grid-template-columns:1fr; } }
+@media (max-width:560px) {
+  .flight-summary { grid-template-columns:1fr; }
+  .alert-config { grid-template-columns:1fr; }
+  .flight-chart { min-height:145px; }
+  .tree-meta { display:flex; margin:5px 0 0; }
+}

@@ -6,6 +6,7 @@ import os
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -66,7 +67,7 @@ class TelemetryStore:
 
     def _initialise(self) -> None:
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        with self._lock, self._connect() as connection:
+        with self._lock, closing(self._connect()) as connection:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS telemetry_samples (
@@ -123,7 +124,7 @@ class TelemetryStore:
         now = time.time()
         sample = self._to_sample(data, now)
         payload = json.dumps(sample, separators=(",", ":"), allow_nan=False)
-        with self._lock, self._connect() as connection:
+        with self._lock, closing(self._connect()) as connection:
             latest = connection.execute(
                 "SELECT sampled_epoch FROM telemetry_samples "
                 "ORDER BY sampled_epoch DESC LIMIT 1"
@@ -155,7 +156,7 @@ class TelemetryStore:
             raise ValueError("Unsupported history window.")
         bounded_limit = max(1, min(int(limit), 2000))
         cutoff = time.time() - WINDOW_SECONDS[window]
-        with self._lock, self._connect() as connection:
+        with self._lock, closing(self._connect()) as connection:
             rows = connection.execute(
                 """SELECT payload FROM telemetry_samples
                    WHERE sampled_epoch >= ?
@@ -165,6 +166,6 @@ class TelemetryStore:
         return [json.loads(row["payload"]) for row in reversed(rows)]
 
     def count(self) -> int:
-        with self._lock, self._connect() as connection:
+        with self._lock, closing(self._connect()) as connection:
             row = connection.execute("SELECT COUNT(*) AS total FROM telemetry_samples").fetchone()
         return int(row["total"])
