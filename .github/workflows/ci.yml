@@ -35,7 +35,8 @@ jobs:
         run: |
           node --check src/static/app.js
           node --check src/static/flight-recorder.js
+          node --check src/static/diagnostics.js
       - name: Compile Python sources
-        run: python -m compileall -q server.py telemetry_store.py tests
+        run: python -m compileall -q server.py telemetry_store.py diagnostics.py tests
       - name: Run tests
         run: python -m pytest -q

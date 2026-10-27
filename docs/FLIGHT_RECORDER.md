@@ -59,3 +59,8 @@ Desktop notifications are optional. NEXUS requests browser permission only after
 - **History chart is sparse:** the recorder is capped at about one sample per five seconds, and the chart displays a bounded subset of points.
 - **Process tree is incomplete:** operating-system permissions, short-lived processes, and the configured process limit may hide entries. This is a snapshot, not a complete OS audit.
 - **Notifications do not appear:** check browser permission settings for the local UI origin. Alerts continue to appear in the interface.
+
+
+## Diagnostics in version 2.0.0
+
+Bottleneck Detective analyses recorded samples and correlates resource-pressure timestamps with best-effort local crash/hang indicators. Process-memory growth tracking is separate from the SQLite recorder and remains in memory only. Read DIAGNOSTICS.md for thresholds, platform sources, limitations, and report privacy.

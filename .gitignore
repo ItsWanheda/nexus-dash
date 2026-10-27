@@ -37,3 +37,6 @@ telemetry.sqlite3-shm
 *.telemetry.json
 nexus-session-*.json
 nexus-session-*.csv
+
+# On-demand diagnostics exports (may contain local process/event metadata)
+nexus-diagnostics-*.json
