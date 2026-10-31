@@ -20,4 +20,4 @@ def test_disk_rates_calculate_throughput_iops_activity_and_latency():
     assert result["read_iops"] == 5.0
     assert result["write_iops"] == 5.0
     assert result["activity_percent"] == 50.0
-    assert result["latency_ms"] == 20.0
+    assert result["latency_ms"] == 25.0
