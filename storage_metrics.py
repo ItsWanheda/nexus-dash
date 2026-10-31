@@ -236,7 +236,8 @@ class StorageSampler:
         activity.sort(key=lambda item: item["total_bytes_per_sec"], reverse=True)
         return activity[:10]
 
-    def collect(self) -> dict[str, Any]:
+    def collect(self, *, include_details: bool = True) -> dict[str, Any]:
+        """Sample aggregate counters; collect process/drive/SMART details only on explicit Storage requests."""
         with self._lock:
             now = time.monotonic()
             sampled_at = datetime.now(timezone.utc).isoformat()
@@ -251,25 +252,27 @@ class StorageSampler:
             self._previous_total = total
             self._previous_total_at = now
             devices = []
-            for device_index, (name, counters) in enumerate(sorted(per_disk.items(), key=lambda item: str(item[0]).casefold())[:64]):
-                previous = self._previous_devices.get(str(name))
-                device_elapsed = now - previous[1] if previous else 0.0
-                device_rates = self._rates(previous[0] if previous else None, counters, device_elapsed)
-                smart = self._smart_health(str(name), now) if device_index < 2 else {
-                    "status": "Unavailable", "health": None, "temperature_c": None,
-                    "reason": "SMART queries are capped at two devices per snapshot to keep local API requests bounded.",
-                }
-                devices.append({
-                    "device": str(name)[:160],
-                    **device_rates,
-                    "smart": smart,
-                    "temperature_c": smart.get("temperature_c"),
-                    "status": "Available" if previous and device_elapsed > 0 else "Warming up",
-                })
-                self._previous_devices[str(name)] = (counters, now)
-            process_elapsed = elapsed
-            top_processes = self._process_activity(now, process_elapsed)
-            drives = self._drives()
+            top_processes = []
+            drives = []
+            if include_details:
+                for device_index, (name, counters) in enumerate(sorted(per_disk.items(), key=lambda item: str(item[0]).casefold())[:64]):
+                    previous = self._previous_devices.get(str(name))
+                    device_elapsed = now - previous[1] if previous else 0.0
+                    device_rates = self._rates(previous[0] if previous else None, counters, device_elapsed)
+                    smart = self._smart_health(str(name), now) if device_index < 2 else {
+                        "status": "Unavailable", "health": None, "temperature_c": None,
+                        "reason": "SMART queries are capped at two devices per snapshot to keep local API requests bounded.",
+                    }
+                    devices.append({
+                        "device": str(name)[:160],
+                        **device_rates,
+                        "smart": smart,
+                        "temperature_c": smart.get("temperature_c"),
+                        "status": "Available" if previous and device_elapsed > 0 else "Warming up",
+                    })
+                    self._previous_devices[str(name)] = (counters, now)
+                top_processes = self._process_activity(now, elapsed)
+                drives = self._drives()
             return {
                 "sampled_at": sampled_at,
                 "status": status,

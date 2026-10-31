@@ -131,7 +131,7 @@ def _collect_stats() -> dict[str, Any]:
         disk = psutil.disk_usage(os.path.abspath(os.sep))
         boot_time = psutil.boot_time()
         uptime = max(0, time.time() - boot_time)
-        storage_snapshot = STORAGE_SAMPLER.collect()
+        storage_snapshot = STORAGE_SAMPLER.collect(include_details=False)
         return {
             "cpu": {"percent": round(psutil.cpu_percent(interval=0.1), 1),
                     "cores": psutil.cpu_count(logical=True) or 0,
