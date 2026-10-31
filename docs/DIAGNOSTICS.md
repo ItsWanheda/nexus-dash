@@ -11,7 +11,7 @@ The analyzer reviews recorded samples for:
 
 A sustained finding requires at least three above-threshold samples and at least 25% of valid samples for that metric. A single crossing is a limited observation, not a sustained bottleneck. Severity depends on observed values and repetition, not an inferred cause.
 
-Disk capacity is not disk I/O latency. This release does not claim to diagnose queue depth, storage latency, thermal throttling, or a specific application's CPU contention from counters it does not collect.
+Disk capacity and disk performance are separate signals. NEXUS now records disk read/write throughput, IOPS, and activity/latency counters where the platform exposes them. Bottleneck Detective reports sustained activity (90% or higher) or response latency (50 ms or higher) as a lead, not a confirmed cause. These are investigation thresholds, not universal hardware limits; counter semantics and availability differ by operating system.
 
 ## Process memory-growth tracking
 

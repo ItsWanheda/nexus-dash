@@ -2,6 +2,15 @@
 
 All notable changes to NEXUS-DASH are recorded here. Unreleased changes are part of the active development branch and are not a published release.
 
+## [Unreleased]
+
+### Added — Advanced hardware and storage intelligence
+- Added component-level CPU/core, memory pressure, NVIDIA GPU, motherboard sensor, and battery telemetry with explicit Available/Unavailable states; optional providers remain optional.
+- Added live disk throughput, IOPS, per-device activity and latency where exposed, bounded top-process I/O snapshots, drive capacity, and optional read-only SMART health queries through smartctl.
+- Extended the Flight Recorder with disk throughput, IOPS, activity, and latency history, and added a Storage view with historical read/write graphs.
+- Extended Bottleneck Detective with sustained disk I/O pressure findings based only on recorded counters; findings remain observational and do not claim root cause.
+- Added platform/provider documentation and tests for missing sensors, counter deltas, and new API contracts.
+
 ## [2.0.0] - 2026-10-27
 
 ### Added — Bottleneck Detective and troubleshooting

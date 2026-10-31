@@ -5,6 +5,8 @@ const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: '◈' },
   { id: 'processes', label: 'Processes', icon: '▤' },
   { id: 'analytics', label: 'Analytics', icon: '◉' },
+  { id: 'hardware', label: 'Hardware', icon: '▦' },
+  { id: 'storage', label: 'Storage', icon: '▧' },
   { id: 'flight-recorder', label: 'Flight Recorder', icon: '◷' },
   { id: 'diagnostics', label: 'Bottleneck Detective', icon: '⌁' },
   { id: 'system', label: 'System Core', icon: '⌘' },
@@ -16,6 +18,7 @@ const app = document.getElementById('app');
 const state = {
   tab: 'dashboard', stats: null, processes: [], history: [], logs: [],
   theme: 'dark', connection: 'unknown', statsTimer: null, processTimer: null, historyTimer: null, diagnosticsTimer: null,
+  hardwareTimer: null, storageTimer: null, storageHistoryTimer: null,
   previousNetwork: null, networkRates: { sent: 0, received: 0 }, processFilter: '',
   recorderHistory: [], processTree: [], processView: 'list', alerts: [], diagnostics: null, diagnosticsWindow: '1h',
   alertConfig: { cpu: 90, ram: 90, disk: 95, consecutive: 3 }, alertCounters: {}, alertLastFired: {}
@@ -128,6 +131,7 @@ function bindEvents() {
     const target = event.target;
     if (target && target.id === 'history-window') loadRecorderHistory();
     if (target && target.id === 'diagnostic-window') { state.diagnosticsWindow = ['15m', '1h', '6h', '24h'].includes(target.value) ? target.value : '1h'; loadDiagnostics(); }
+    if (target && target.id === 'storage-history-window') { state.storageWindow = target.value; loadStorageHistory(); }
     if (target && ['alert-cpu', 'alert-ram', 'alert-disk', 'alert-consecutive'].includes(target.id)) saveRecorderSettings();
   });
   app.addEventListener('keydown', function (event) {
@@ -165,6 +169,8 @@ function handleClick(event) {
   else if (action === 'export-session-csv') exportRecorderSession('csv');
   else if (action === 'enable-notifications') enableRecorderNotifications();
   else if (action === 'diagnostic-refresh') loadDiagnostics();
+  else if (action === 'hardware-refresh') loadHardware();
+  else if (action === 'storage-refresh') { loadStorage(); loadStorageHistory(); }
   else if (action === 'export-diagnostic-report') exportDiagnosticReport();
   else if (action === 'clear-logs') {
     state.logs = [];
@@ -226,6 +232,10 @@ function renderContent() {
       metricCard('SAMPLE WINDOW','analytics-window','—','analytics-window-meta','Approximate duration','time') +
       '</div><section class="panel"><div class="panel-heading"><div><span class="eyebrow">RECENT HISTORY</span><h3>CPU and memory</h3></div><span class="panel-tag">SESSION ONLY</span></div><div id="analytics-chart" class="history-chart"></div><div class="chart-legend"><span><i class="legend-dot cpu-legend"></i>CPU</span><span><i class="legend-dot ram-legend"></i>RAM</span></div></section>';
     updateAnalytics();
+  } else if (state.tab === 'hardware') {
+    renderHardware();
+  } else if (state.tab === 'storage') {
+    renderStorage();
   } else if (state.tab === 'flight-recorder') {
     renderFlightRecorder();
   } else if (state.tab === 'diagnostics') {
@@ -390,10 +400,16 @@ function startPolling() {
   if (state.processTimer) window.clearInterval(state.processTimer);
   if (state.historyTimer) window.clearInterval(state.historyTimer);
   if (state.diagnosticsTimer) window.clearInterval(state.diagnosticsTimer);
+  if (state.hardwareTimer) window.clearInterval(state.hardwareTimer);
+  if (state.storageTimer) window.clearInterval(state.storageTimer);
+  if (state.storageHistoryTimer) window.clearInterval(state.storageHistoryTimer);
   state.statsTimer = null;
   state.processTimer = null;
   state.historyTimer = null;
   state.diagnosticsTimer = null;
+  state.hardwareTimer = null;
+  state.storageTimer = null;
+  state.storageHistoryTimer = null;
   if (['dashboard', 'analytics', 'system', 'flight-recorder'].includes(state.tab)) {
     fetchStats();
     state.statsTimer = window.setInterval(fetchStats, POLL_INTERVAL_MS);
@@ -405,6 +421,16 @@ function startPolling() {
   if (state.tab === 'diagnostics') {
     loadDiagnostics();
     state.diagnosticsTimer = window.setInterval(loadDiagnostics, 30000);
+  }
+  if (state.tab === 'hardware') {
+    loadHardware();
+    state.hardwareTimer = window.setInterval(loadHardware, 5000);
+  }
+  if (state.tab === 'storage') {
+    loadStorage();
+    loadStorageHistory();
+    state.storageTimer = window.setInterval(loadStorage, 2500);
+    state.storageHistoryTimer = window.setInterval(loadStorageHistory, 15000);
   }
   if (state.tab === 'processes') {
     if (state.processView === 'tree') loadProcessTree(); else loadProcesses();
@@ -490,6 +516,8 @@ async function refreshCurrentView() {
   if (['dashboard', 'analytics', 'system', 'flight-recorder'].includes(state.tab)) await fetchStats();
   if (state.tab === 'flight-recorder') await loadRecorderHistory();
   if (state.tab === 'diagnostics') await loadDiagnostics();
+  if (state.tab === 'hardware') await loadHardware();
+  if (state.tab === 'storage') { await loadStorage(); await loadStorageHistory(); }
   if (state.tab === 'processes') {
     if (state.processView === 'tree') await loadProcessTree(); else await loadProcesses();
   }
@@ -510,5 +538,8 @@ window.addEventListener('beforeunload', function () {
   if (state.processTimer) window.clearInterval(state.processTimer);
   if (state.historyTimer) window.clearInterval(state.historyTimer);
   if (state.diagnosticsTimer) window.clearInterval(state.diagnosticsTimer);
+  if (state.hardwareTimer) window.clearInterval(state.hardwareTimer);
+  if (state.storageTimer) window.clearInterval(state.storageTimer);
+  if (state.storageHistoryTimer) window.clearInterval(state.storageHistoryTimer);
 });
 init();

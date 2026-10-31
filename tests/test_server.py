@@ -118,3 +118,28 @@ def test_diagnostics_report_is_json_download():
     assert payload["report_type"] == "local-diagnostics"
     assert payload["analysis"]["window"] == "15m"
     assert "privacy_notice" in payload
+
+
+
+def test_hardware_endpoint_reports_explicit_component_statuses():
+    response = client.get("/api/hardware")
+    assert response.status_code == 200
+    payload = response.json()
+    assert {"cpu", "gpu", "memory", "motherboard", "battery"} <= payload.keys()
+    assert payload["cpu"]["voltage_v"]["status"] == "Unavailable"
+
+
+def test_storage_endpoint_returns_bounded_drive_and_io_data():
+    response = client.get("/api/storage")
+    assert response.status_code == 200
+    payload = response.json()
+    assert {"sampled_at", "status", "drives", "devices", "totals", "top_processes", "capabilities"} <= payload.keys()
+    assert isinstance(payload["drives"], list)
+    assert isinstance(payload["devices"], list)
+    assert len(payload["top_processes"]) <= 10
+    assert {"read_bytes_per_sec", "write_bytes_per_sec", "read_iops", "write_iops"} <= payload["totals"].keys()
+
+
+def test_storage_endpoint_rejects_untrusted_origin():
+    response = client.get("/api/storage", headers={"Origin": "https://untrusted.example"})
+    assert response.status_code == 403

@@ -9,6 +9,7 @@ def sample(cpu=22.5, ram=41.0):
         "disk": {"percent": 55, "used_gb": 200, "total_gb": 500},
         "network": {"sent_bytes": 1234, "recv_bytes": 5678},
         "gpu": {"status": "Unavailable", "used_gb": None, "total_gb": None},
+        "storage_io": {"read_bytes_per_sec": 1024, "write_bytes_per_sec": 2048, "read_iops": 4, "write_iops": 5, "activity_percent": 42, "latency_ms": 3.5},
         "system": {"hostname": "must-not-be-stored", "user": "also-must-not-be-stored"},
     }
 

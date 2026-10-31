@@ -64,3 +64,10 @@ Desktop notifications are optional. NEXUS requests browser permission only after
 ## Diagnostics in version 2.0.0
 
 Bottleneck Detective analyses recorded samples and correlates resource-pressure timestamps with best-effort local crash/hang indicators. Process-memory growth tracking is separate from the SQLite recorder and remains in memory only. Read DIAGNOSTICS.md for thresholds, platform sources, limitations, and report privacy.
+
+
+## Disk I/O history
+
+The Flight Recorder also records aggregate disk read/write throughput, read/write IOPS, and the maximum reported activity/latency values when the operating system exposes those counters. The history remains bounded by the same 24-hour and 20,000-sample limits. Missing platform counters are stored as null and are not drawn as zero. Per-process I/O, process names, PIDs, drive mount paths, SMART output, and device identifiers are not written to SQLite.
+
+The Storage view obtains a fresh live snapshot and replays historical aggregate rates from the Flight Recorder. Counter rates require at least two samples; the first reading is marked as warming up.

@@ -24,6 +24,8 @@ from starlette.responses import JSONResponse, Response
 
 from telemetry_store import SAMPLE_FIELDS, WINDOW_SECONDS, TelemetryStore
 from diagnostics import DIAGNOSTICS_VERSION, ProcessMemoryTracker, analyse_diagnostics, collect_os_events
+from hardware import collect_hardware
+from storage_metrics import StorageSampler
 
 LOGGER = logging.getLogger("nexus")
 ALLOWED_ORIGINS = {
@@ -36,6 +38,7 @@ _NVML_INITIALIZED = False
 
 TELEMETRY_STORE = TelemetryStore()
 PROCESS_MEMORY_TRACKER = ProcessMemoryTracker()
+STORAGE_SAMPLER = StorageSampler()
 _RECORDER_STOP = threading.Event()
 _RECORDER_THREAD: threading.Thread | None = None
 
@@ -128,6 +131,7 @@ def _collect_stats() -> dict[str, Any]:
         disk = psutil.disk_usage(os.path.abspath(os.sep))
         boot_time = psutil.boot_time()
         uptime = max(0, time.time() - boot_time)
+        storage_snapshot = STORAGE_SAMPLER.collect()
         return {
             "cpu": {"percent": round(psutil.cpu_percent(interval=0.1), 1),
                     "cores": psutil.cpu_count(logical=True) or 0,
@@ -140,6 +144,7 @@ def _collect_stats() -> dict[str, Any]:
             "disk": {"used_gb": round(disk.used / (1024 ** 3), 2),
                      "total_gb": round(disk.total / (1024 ** 3), 2), "percent": round(disk.percent, 1)},
             "gpu": _gpu_memory(),
+            "storage_io": storage_snapshot.get("totals", {}),
             "system": {"hostname": platform.node() or "Unknown", "platform": platform.system(),
                        "platform_release": platform.release(), "architecture": platform.machine(),
                        "python_version": platform.python_version(), "user": getpass.getuser(),
@@ -239,6 +244,26 @@ def export_diagnostics_report(window: str = Query(default="1h")) -> Response:
     return Response(content=json.dumps(report, indent=2, allow_nan=False),
         media_type="application/json; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="nexus-diagnostics-{suffix}.json"'})
+
+@app.get("/api/hardware")
+def get_hardware() -> dict[str, Any]:
+    """Return component-level hardware readings with explicit sensor availability."""
+    try:
+        return collect_hardware()
+    except Exception:
+        LOGGER.exception("Unable to collect hardware telemetry")
+        raise HTTPException(status_code=503, detail="Hardware telemetry is temporarily unavailable.")
+
+
+@app.get("/api/storage")
+def get_storage() -> dict[str, Any]:
+    """Return live disk I/O, per-drive capacity, process activity, and optional SMART data."""
+    try:
+        return STORAGE_SAMPLER.collect()
+    except Exception:
+        LOGGER.exception("Unable to collect storage telemetry")
+        raise HTTPException(status_code=503, detail="Storage telemetry is temporarily unavailable.")
+
 
 @app.get("/api/processes")
 def get_processes(limit: int = Query(default=100, ge=1, le=200)) -> dict[str, Any]:

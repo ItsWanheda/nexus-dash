@@ -21,7 +21,8 @@ WINDOW_SECONDS = {
 SAMPLE_FIELDS = (
     "timestamp", "cpu_percent", "ram_percent", "ram_used_gb", "ram_total_gb",
     "disk_percent", "disk_used_gb", "disk_total_gb", "network_sent_bytes",
-    "network_recv_bytes", "gpu_used_gb", "gpu_total_gb",
+    "network_recv_bytes", "gpu_used_gb", "gpu_total_gb", "disk_read_bytes_per_sec",
+    "disk_write_bytes_per_sec", "disk_read_iops", "disk_write_iops", "disk_activity_percent", "disk_latency_ms",
 )
 
 
@@ -95,6 +96,7 @@ class TelemetryStore:
         disk = data.get("disk") or {}
         network = data.get("network") or {}
         gpu = data.get("gpu") or {}
+        storage_io = data.get("storage_io") or {}
         timestamp = data.get("sampled_at")
         if not isinstance(timestamp, str):
             timestamp = datetime.fromtimestamp(now, timezone.utc).isoformat()
@@ -113,10 +115,18 @@ class TelemetryStore:
             "network_recv_bytes": int(_number(network.get("recv_bytes"), 0) or 0),
             "gpu_used_gb": _number(gpu.get("used_gb")),
             "gpu_total_gb": _number(gpu.get("total_gb")),
+            "disk_read_bytes_per_sec": _number(storage_io.get("read_bytes_per_sec")),
+            "disk_write_bytes_per_sec": _number(storage_io.get("write_bytes_per_sec")),
+            "disk_read_iops": _number(storage_io.get("read_iops")),
+            "disk_write_iops": _number(storage_io.get("write_iops")),
+            "disk_activity_percent": _number(storage_io.get("activity_percent")),
+            "disk_latency_ms": _number(storage_io.get("latency_ms")),
         }
         sample["cpu_percent"] = min(100.0, max(0.0, float(sample["cpu_percent"] or 0)))
         sample["ram_percent"] = min(100.0, max(0.0, float(sample["ram_percent"] or 0)))
         sample["disk_percent"] = min(100.0, max(0.0, float(sample["disk_percent"] or 0)))
+        if sample["disk_activity_percent"] is not None:
+            sample["disk_activity_percent"] = min(100.0, max(0.0, float(sample["disk_activity_percent"])))
         return sample
 
     def record(self, data: dict[str, Any]) -> bool:
