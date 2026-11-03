@@ -2,9 +2,10 @@ name: Windows Desktop Build
 
 on:
   push:
-    branches: ["improve/**"]
+    branches: [main, "improve/**"]
     paths:
       - "desktop_app.py"
+      - "nexus_dash/**"
       - "NEXUS-DASH.spec"
       - "requirements*.txt"
       - "installer/**"
@@ -18,6 +19,7 @@ on:
     branches: [main]
     paths:
       - "desktop_app.py"
+      - "nexus_dash/**"
       - "NEXUS-DASH.spec"
       - "requirements*.txt"
       - "installer/**"
