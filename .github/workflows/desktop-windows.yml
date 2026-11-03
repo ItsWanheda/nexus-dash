@@ -46,6 +46,11 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-desktop.txt
+      - name: Verify configured Python interpreter
+        shell: pwsh
+        run: |
+          python --version
+          python -c "import sys; print(sys.executable); assert sys.version_info[:2] == (3, 12)"
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
       - name: Build Windows application and installer
