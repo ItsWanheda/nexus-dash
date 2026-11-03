@@ -118,3 +118,22 @@ def test_analytics_history_supports_30_day_window_and_previous_period(tmp_path):
     assert report["window"] == "30d"
     assert len(report["current"]) == 1
     assert report["previous"] == []
+
+
+
+def test_network_history_returns_latest_points_in_chronological_order(tmp_path):
+    import time
+    store = TelemetryStore(tmp_path / "network-order", sample_interval_seconds=0)
+    now = time.time()
+    for offset, sent in ((-5, 100), (-4, 200), (-3, 500)):
+        store.record_network_interfaces([{
+            "name": "eth0", "bytes_sent": sent, "bytes_recv": sent * 2,
+            "packets_sent": sent // 10, "packets_recv": sent // 5,
+            "errors_in": 0, "errors_out": 0, "drops_in": 0, "drops_out": 0,
+            "is_up": True,
+        }], sampled_epoch=now + offset)
+    rows = store.get_network_history("24h", interface="eth0", limit_per_interface=2)
+    assert len(rows) == 2
+    assert rows[0]["bytes_sent"] == 200
+    assert rows[1]["bytes_sent"] == 500
+    assert rows[0]["sampled_epoch"] < rows[1]["sampled_epoch"]

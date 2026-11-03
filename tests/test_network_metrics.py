@@ -46,3 +46,22 @@ def test_network_connectivity_probe_is_bounded_and_reports_attempts(monkeypatch)
     assert result["status"] in {"connected", "tcp-failed"}
     assert result["success_count"] + result["failure_count"] == 1
     assert result["resolved_address_count"] == 1
+
+
+
+def test_network_history_rates_are_calculated_independently_per_interface():
+    rows = [
+        {"interface_name": "eth0", "sampled_epoch": 10, "bytes_sent": 100, "bytes_recv": 100,
+         "packets_sent": 1, "packets_recv": 1},
+        {"interface_name": "wlan0", "sampled_epoch": 11, "bytes_sent": 1000, "bytes_recv": 1000,
+         "packets_sent": 10, "packets_recv": 10},
+        {"interface_name": "eth0", "sampled_epoch": 12, "bytes_sent": 300, "bytes_recv": 500,
+         "packets_sent": 3, "packets_recv": 5},
+        {"interface_name": "wlan0", "sampled_epoch": 13, "bytes_sent": 1600, "bytes_recv": 2000,
+         "packets_sent": 16, "packets_recv": 20},
+    ]
+    points = build_network_history_points(rows)
+    assert points[2]["sent_bytes_per_sec"] == 100
+    assert points[2]["received_bytes_per_sec"] == 200
+    assert points[3]["sent_bytes_per_sec"] == 300
+    assert points[3]["received_bytes_per_sec"] == 500
