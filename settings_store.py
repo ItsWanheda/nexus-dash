@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 from pathlib import Path
@@ -38,9 +39,15 @@ class SettingsStore:
                 for key in DEFAULT_SETTINGS:
                     if key in saved:
                         result[key] = saved[key]
+            retention_seconds = int(result["retention_days"]) * 86400
+            effective_interval = max(int(result["sampling_interval_seconds"]), math.ceil(retention_seconds / 20_000))
+            result["effective_sampling_interval_seconds"] = effective_interval
             result["data_directory"] = str(self.directory)
             result["database_path"] = str(self.directory / "telemetry.sqlite3")
-            result["retention_note"] = "Retention applies to raw samples; long windows are retained up to the configured limit."
+            result["retention_note"] = (
+                f"Up to {result['retention_days']} days within 20,000 samples; "
+                f"effective recorder cadence is at least {effective_interval} seconds."
+            )
             return result
 
     def update(self, changes: dict[str, Any]) -> dict[str, Any]:

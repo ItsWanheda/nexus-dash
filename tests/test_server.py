@@ -192,3 +192,10 @@ def test_process_termination_requires_process_identity():
     created = psutil.Process(os.getpid()).create_time()
     response = client.post("/api/process/kill", json={"pid": os.getpid(), "create_time": created + 50})
     assert response.status_code in {403, 409}
+
+
+
+def test_desktop_module_imports_without_optional_gui_dependencies():
+    import desktop_app
+    assert desktop_app.APP_ROOT.exists()
+    assert callable(desktop_app.main)

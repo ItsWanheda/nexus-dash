@@ -1,0 +1,60 @@
+name: Windows Desktop Build
+
+on:
+  push:
+    branches: ["improve/**"]
+    paths:
+      - "desktop_app.py"
+      - "NEXUS-DASH.spec"
+      - "requirements*.txt"
+      - "installer/**"
+      - "scripts/**"
+      - ".github/workflows/desktop-windows.yml"
+      - "server.py"
+      - "settings_store.py"
+      - "src/**"
+      - "index.html"
+  pull_request:
+    branches: [main]
+    paths:
+      - "desktop_app.py"
+      - "NEXUS-DASH.spec"
+      - "requirements*.txt"
+      - "installer/**"
+      - "scripts/**"
+      - ".github/workflows/desktop-windows.yml"
+      - "server.py"
+      - "settings_store.py"
+      - "src/**"
+      - "index.html"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-desktop.txt
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build Windows application and installer
+        shell: pwsh
+        run: ./scripts/build_windows.ps1
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEXUS-DASH-windows-x64
+          path: |
+            dist/NEXUS-DASH-Setup-*-x64.exe
+            dist/NEXUS-DASH-windows-x64.zip
+          if-no-files-found: warn
+          retention-days: 14

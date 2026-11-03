@@ -237,7 +237,7 @@ class TelemetryStore:
             )
             connection.execute(
                 "DELETE FROM timeline_events WHERE created_epoch < ?",
-                (now - max(self.retention_seconds, 30 * 86400),),
+                (now - self.retention_seconds,),
             )
             connection.execute(
                 """DELETE FROM timeline_events WHERE id IN (

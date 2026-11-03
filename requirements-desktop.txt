@@ -1,0 +1,5 @@
+-r requirements.txt
+pywebview>=5.4
+pystray>=0.19.5
+Pillow>=10.0
+pyinstaller>=6.0

@@ -7,6 +7,7 @@ import ipaddress
 import io
 import json
 import logging
+import math
 import os
 import platform
 import sqlite3
@@ -141,7 +142,7 @@ def _terminal(stdout: str, stderr: str = "", returncode: int = 0) -> dict[str, A
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
+def health() -> dict[str, Any]:
     return {"status": "ok", "service": "nexus-local-api", "version": DIAGNOSTICS_VERSION,
             "desktop_runtime": os.environ.get("NEXUS_DESKTOP_RUNTIME") == "1"}
 
@@ -180,7 +181,6 @@ def _collect_stats() -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="System metrics are temporarily unavailable.") from exc
 
 
-@app.get("/api/stats")
 def _record_resource_events(payload: dict[str, Any]) -> None:
     metrics = [
         ("cpu", "CPU utilisation spike", float(payload.get("cpu", {}).get("percent") or 0), 90.0, 85.0),
@@ -221,8 +221,10 @@ def _recorder_loop() -> None:
         try:
             settings = SETTINGS_STORE.get()
             interval = int(settings["sampling_interval_seconds"])
-            TELEMETRY_STORE.sample_interval_seconds = float(interval)
-            TELEMETRY_STORE.retention_seconds = int(settings["retention_days"]) * 86400
+            retention_seconds = int(settings["retention_days"]) * 86400
+            effective_interval = max(interval, math.ceil(retention_seconds / TELEMETRY_STORE.max_samples))
+            TELEMETRY_STORE.sample_interval_seconds = float(effective_interval)
+            TELEMETRY_STORE.retention_seconds = retention_seconds
             if settings["background_recording"]:
                 payload = _collect_stats()
                 if TELEMETRY_STORE.record(payload):
@@ -362,9 +364,12 @@ def get_settings() -> dict[str, Any]:
 @app.put("/api/settings")
 def update_settings(payload: SettingsUpdate) -> dict[str, Any]:
     try:
-        updated = SETTINGS_STORE.update(payload.dict(exclude_none=True))
-        TELEMETRY_STORE.sample_interval_seconds = float(updated["sampling_interval_seconds"])
-        TELEMETRY_STORE.retention_seconds = int(updated["retention_days"]) * 86400
+        updated = SETTINGS_STORE.update(payload.model_dump(exclude_none=True))
+        retention_seconds = int(updated["retention_days"]) * 86400
+        effective_interval = max(int(updated["sampling_interval_seconds"]),
+                                 math.ceil(retention_seconds / TELEMETRY_STORE.max_samples))
+        TELEMETRY_STORE.sample_interval_seconds = float(effective_interval)
+        TELEMETRY_STORE.retention_seconds = retention_seconds
         return updated
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
