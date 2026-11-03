@@ -34,6 +34,9 @@ from process_intelligence import ProcessIntelligence
 from settings_store import SettingsStore
 from network_metrics import NetworkSampler, collect_connections, diagnose_tcp_connectivity, build_network_history_points
 from analytics import build_analytics_report
+from process_network import collect_process_network
+from network_quality import sample_targets
+from anomaly_detection import detect_anomalies
 
 LOGGER = logging.getLogger("nexus")
 ALLOWED_ORIGINS = {
@@ -48,9 +51,13 @@ TELEMETRY_STORE = TelemetryStore()
 PROCESS_MEMORY_TRACKER = ProcessMemoryTracker()
 STORAGE_SAMPLER = StorageSampler()
 SETTINGS_STORE = SettingsStore(TELEMETRY_STORE.directory)
-PROCESS_INTELLIGENCE = ProcessIntelligence()
+PROCESS_INTELLIGENCE = ProcessIntelligence(max_processes=50)
 NETWORK_SAMPLER = NetworkSampler()
 _NETWORK_ERROR_ACTIVE: set[str] = set()
+_NETWORK_QUALITY_FAILURES: dict[str, int] = {}
+_NETWORK_QUALITY_LAST: float = 0.0
+_ANOMALY_LAST_FIRED: dict[str, float] = {}
+_PROCESS_NETWORK_LAST: float = 0.0
 _TIMELINE_THRESHOLDS: dict[str, bool] = {}
 _RECORDER_STOP = threading.Event()
 _RECORDER_THREAD: threading.Thread | None = None
@@ -101,6 +108,10 @@ class SettingsUpdate(BaseModel):
     process_exclusions: list[str] | None = None
     privacy_mode: bool | None = None
     start_minimized: bool | None = None
+    process_network_enabled: bool | None = None
+    network_quality_enabled: bool | None = None
+    network_quality_targets: list[dict[str, Any]] | None = None
+    assistant_model: str | None = None
 
 
 def _format_uptime(seconds: float) -> str:
@@ -188,6 +199,55 @@ def _collect_stats() -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="System metrics are temporarily unavailable.") from exc
 
 
+def _capture_incident(title: str, summary: str, severity: str, trigger: str) -> dict[str, Any]:
+    evidence = {
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "window_seconds": 600,
+        "telemetry": TELEMETRY_STORE.get_history("15m", 300),
+        "process_performance": TELEMETRY_STORE.get_recent_process_samples(600, 500),
+        "network_quality": TELEMETRY_STORE.get_network_quality("15m", 100),
+        "process_network": TELEMETRY_STORE.get_recent_process_network(600, 200),
+        "timeline": TELEMETRY_STORE.get_events("15m", 200),
+        "privacy": "Local evidence. Process names and PIDs may be included. No executable paths, command lines, IP/MAC addresses or packet contents are captured.",
+    }
+    incident = TELEMETRY_STORE.create_incident_capture(
+        title, summary, severity, trigger, evidence
+    )
+    TELEMETRY_STORE.record_event(
+        "system", f"Incident captured: {title}", summary, severity=severity,
+        metadata={"incident_id": incident["id"], "trigger": trigger},
+    )
+    return incident
+
+
+def _record_adaptive_anomalies(payload: dict[str, Any]) -> dict[str, Any]:
+    report = detect_anomalies(TELEMETRY_STORE.get_history("1h", 300))
+    now = time.time()
+    findings = []
+    for item in report.get("findings", []):
+        key = str(item.get("metric"))
+        if now - _ANOMALY_LAST_FIRED.get(key, 0.0) < 600:
+            continue
+        _ANOMALY_LAST_FIRED[key] = now
+        findings.append(item)
+        TELEMETRY_STORE.record_event(
+            "resource", f"Adaptive anomaly: {item['label']}",
+            f"Observed {item['current']}{item['unit']} versus baseline median {item['baseline_median']}{item['unit']}; robust z={item['robust_z_score']}.",
+            severity=item["severity"],
+            metadata={"metric": key, "current": item["current"], "baseline": item["baseline_median"],
+                      "robust_z": item["robust_z_score"]},
+        )
+    if findings:
+        _capture_incident(
+            "Adaptive resource anomaly",
+            "; ".join(f"{item['label']} {item['current']}{item['unit']} (baseline {item['baseline_median']}{item['unit']})" for item in findings),
+            "critical" if any(item["severity"] == "critical" for item in findings) else "warning",
+            "adaptive-anomaly",
+        )
+    report["findings"] = findings
+    return report
+
+
 def _record_resource_events(payload: dict[str, Any]) -> None:
     metrics = [
         ("cpu", "CPU utilisation spike", float(payload.get("cpu", {}).get("percent") or 0), 90.0, 85.0),
@@ -203,6 +263,8 @@ def _record_resource_events(payload: dict[str, Any]) -> None:
                 severity="critical" if value >= 98 else "warning",
                 metadata={"metric": key, "value": round(value, 1), "threshold": threshold},
             )
+            _capture_incident(title, f"Resource threshold crossed: {value:.1f}% (threshold {threshold:.0f}%).",
+                              "critical" if value >= 98 else "warning", "resource-threshold")
             _TIMELINE_THRESHOLDS[key] = True
         elif active and value < reset_at:
             _TIMELINE_THRESHOLDS[key] = False
@@ -259,8 +321,45 @@ def _collect_network_snapshot() -> dict[str, Any]:
     return snapshot
 
 
+
+
+def _run_network_quality_checks(settings: dict[str, Any]) -> None:
+    global _NETWORK_QUALITY_LAST
+    if not settings.get("network_quality_enabled"):
+        return
+    targets = settings.get("network_quality_targets") or []
+    if not targets or time.time() - _NETWORK_QUALITY_LAST < 60:
+        return
+    _NETWORK_QUALITY_LAST = time.time()
+    for sample in sample_targets(targets):
+        TELEMETRY_STORE.record_network_quality(sample)
+        key = f"{sample['host_label']}:{sample['port']}"
+        failures = _NETWORK_QUALITY_FAILURES.get(key, 0)
+        if sample["status"] == "connected":
+            _NETWORK_QUALITY_FAILURES[key] = 0
+        else:
+            failures += 1
+            _NETWORK_QUALITY_FAILURES[key] = failures
+            if failures == 3:
+                detail = f"Three consecutive DNS/TCP checks failed for the configured target {key}."
+                TELEMETRY_STORE.record_event("network", "Network quality degradation", detail,
+                                             severity="warning", metadata={"target": key, "failures": failures})
+                _capture_incident("Network quality degradation", detail, "warning", "network-quality")
+
+
+def _run_process_network_sampling(settings: dict[str, Any]) -> None:
+    global _PROCESS_NETWORK_LAST
+    if not settings.get("process_network_enabled") or time.time() - _PROCESS_NETWORK_LAST < 15:
+        return
+    _PROCESS_NETWORK_LAST = time.time()
+    result = collect_process_network()
+    if result.get("items"):
+        TELEMETRY_STORE.record_process_network(result["items"])
+
+
 def _recorder_loop() -> None:
     cycle = 0
+    process_network_cycle = 0
     while not _RECORDER_STOP.is_set():
         try:
             settings = SETTINGS_STORE.get()
@@ -273,13 +372,32 @@ def _recorder_loop() -> None:
                 payload = _collect_stats()
                 if TELEMETRY_STORE.record(payload):
                     _record_resource_events(payload)
+                    try:
+                        _record_adaptive_anomalies(payload)
+                    except Exception:
+                        LOGGER.exception("Adaptive anomaly detection failed")
                 try:
                     _collect_network_snapshot()
                 except Exception:
                     LOGGER.exception("Background network sample failed")
+                try:
+                    _run_network_quality_checks(settings)
+                except Exception:
+                    LOGGER.exception("Network quality sampling failed")
+                try:
+                    _run_process_network_sampling(settings)
+                except Exception:
+                    LOGGER.exception("Per-process network sampling failed")
                 cycle += interval
-                if settings["process_history_enabled"] and cycle >= int(settings["process_history_interval_seconds"]):
+                process_network_cycle += interval
+                retention_seconds = int(settings["retention_days"]) * 86400
+                effective_process_interval = max(
+                    int(settings["process_history_interval_seconds"]),
+                    math.ceil(retention_seconds * PROCESS_INTELLIGENCE.max_processes / 1_200_000),
+                )
+                if settings["process_history_enabled"] and cycle >= effective_process_interval:
                     process_events = PROCESS_INTELLIGENCE.sample(settings.get("process_exclusions", []))
+                    TELEMETRY_STORE.record_process_samples(process_events.get("samples", []), max_rows=1_200_000)
                     for item in process_events["started"]:
                         TELEMETRY_STORE.record_event(
                             "process-start", f"Process started: {item['name']}",
@@ -328,8 +446,11 @@ def get_diagnostics(window: str = Query(default="1h")) -> dict[str, Any]:
         PROCESS_MEMORY_TRACKER.sample()
         growth = PROCESS_MEMORY_TRACKER.get_growth(window)
         event_result = collect_os_events(window)
-        return analyse_diagnostics(samples, growth, event_result["events"], window=window,
-                                   event_source_status=event_result["status"])
+        analysis = analyse_diagnostics(samples, growth, event_result["events"], window=window,
+                                       event_source_status=event_result["status"])
+        analysis["adaptive_anomalies"] = detect_anomalies(samples)
+        analysis["incidents"] = TELEMETRY_STORE.get_incidents(50)
+        return analysis
     except (OSError, RuntimeError, ValueError, sqlite3.Error):
         LOGGER.exception("Unable to analyse local diagnostics")
         raise HTTPException(status_code=503, detail="Diagnostics are temporarily unavailable.")
@@ -355,6 +476,8 @@ def export_diagnostics_report(window: str = Query(default="1h")) -> Response:
         "report_type": "local-diagnostics", "generated_at": datetime.now(timezone.utc).isoformat(),
         "window": window, "analysis": analysis, "telemetry_samples": samples,
         "process_memory_growth": growth, "os_events": event_result,
+        "adaptive_anomalies": detect_anomalies(samples),
+        "incident_captures": TELEMETRY_STORE.get_incidents(100),
         "privacy_notice": "Generated on request. Includes local telemetry and may include process names, PIDs, and sanitized OS event metadata. Review before sharing.",
     }
     suffix = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -403,6 +526,84 @@ def get_network_connections(
     except Exception:
         LOGGER.exception("Unable to enumerate network connections")
         raise HTTPException(status_code=503, detail="Network connection data is temporarily unavailable.")
+
+
+
+
+@app.get("/api/network/processes")
+def get_process_network(window: str = Query(default="24h"), limit: int = Query(default=500, ge=1, le=2000)) -> dict[str, Any]:
+    if window not in WINDOW_SECONDS:
+        raise HTTPException(status_code=400, detail="Unsupported process-network window.")
+    settings = SETTINGS_STORE.get()
+    if not settings.get("process_network_enabled"):
+        return {"status": "disabled", "provider": None, "items": [],
+                "reason": "Enable process network attribution in Settings. A compatible OS provider is required."}
+    try:
+        live = collect_process_network()
+        if live.get("items"):
+            TELEMETRY_STORE.record_process_network(live["items"])
+        history = TELEMETRY_STORE.get_process_network_history(window, limit)
+        return {**live, "history": history, "history_count": len(history)}
+    except (OSError, RuntimeError, sqlite3.Error):
+        LOGGER.exception("Process network accounting failed")
+        raise HTTPException(status_code=503, detail="Process network data is temporarily unavailable.")
+
+
+@app.get("/api/network/quality")
+def get_network_quality(window: str = Query(default="24h"), limit: int = Query(default=1000, ge=1, le=2000)) -> dict[str, Any]:
+    if window not in WINDOW_SECONDS:
+        raise HTTPException(status_code=400, detail="Unsupported network quality window.")
+    try:
+        samples = TELEMETRY_STORE.get_network_quality(window, limit)
+        return {"status": "enabled" if SETTINGS_STORE.get().get("network_quality_enabled") else "disabled",
+                "targets": SETTINGS_STORE.get().get("network_quality_targets", []),
+                "count": len(samples), "samples": samples}
+    except (OSError, RuntimeError, sqlite3.Error):
+        LOGGER.exception("Unable to read network quality history")
+        raise HTTPException(status_code=503, detail="Network quality history is temporarily unavailable.")
+
+
+@app.get("/api/anomalies")
+def get_anomalies(window: str = Query(default="1h")) -> dict[str, Any]:
+    if window not in WINDOW_SECONDS:
+        raise HTTPException(status_code=400, detail="Unsupported anomaly analysis window.")
+    try:
+        report = detect_anomalies(TELEMETRY_STORE.get_history(window, 2000))
+        report["window"] = window
+        return report
+    except (OSError, RuntimeError, sqlite3.Error):
+        LOGGER.exception("Anomaly analysis failed")
+        raise HTTPException(status_code=503, detail="Anomaly analysis is temporarily unavailable.")
+
+
+class IncidentCaptureRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    note: str = Field(default="", max_length=500)
+    severity: str = Field(default="info", pattern="^(info|warning|critical)$")
+
+
+@app.get("/api/incidents")
+def list_incidents(limit: int = Query(default=100, ge=1, le=250)) -> dict[str, Any]:
+    return {"incidents": TELEMETRY_STORE.get_incidents(limit)}
+
+
+@app.get("/api/incidents/{incident_id}")
+def read_incident(incident_id: int) -> dict[str, Any]:
+    incident = TELEMETRY_STORE.get_incident(incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident capture was not found.")
+    return incident
+
+
+@app.post("/api/incidents/capture")
+def capture_incident(payload: IncidentCaptureRequest) -> dict[str, Any]:
+    try:
+        incident = _capture_incident(payload.title.strip(), payload.note.strip() or "User requested a forensic snapshot.",
+                                     payload.severity, "manual")
+        return {"status": "captured", "incident": incident}
+    except (OSError, ValueError, sqlite3.Error):
+        LOGGER.exception("Manual incident capture failed")
+        raise HTTPException(status_code=503, detail="Incident capture could not be saved.")
 
 
 @app.get("/api/network/history")
@@ -577,20 +778,20 @@ def get_process_history(
     create_time: float = Query(gt=0),
     window: str = Query(default="30m"),
 ) -> dict[str, Any]:
-    windows = {"5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "6h": 21600, "24h": 86400}
+    windows = {"5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "6h": 21600,
+               "24h": 86400, "7d": 604800, "30d": 2592000}
     if window not in windows:
         raise HTTPException(status_code=400, detail="Unsupported process-history window.")
     try:
-        process = psutil.Process(pid)
-        if abs(float(process.create_time()) - create_time) > 0.01:
-            raise HTTPException(status_code=404, detail="The process no longer exists or its PID was reused.")
-        history = PROCESS_INTELLIGENCE.history(pid, create_time, windows[window])
+        history = TELEMETRY_STORE.get_process_history(pid, create_time, windows[window], limit=2000)
+        if not history:
+            history = PROCESS_INTELLIGENCE.history(pid, create_time, windows[window])
         return {"pid": pid, "create_time": create_time, "window": window, "samples": history,
-                "count": len(history), "status": "Available" if history else "Warming up"}
-    except psutil.NoSuchProcess as exc:
-        raise HTTPException(status_code=404, detail="The process no longer exists.") from exc
-    except psutil.AccessDenied as exc:
-        raise HTTPException(status_code=403, detail="The operating system denied access to this process.") from exc
+                "count": len(history), "status": "Available" if history else "Warming up",
+                "storage": "local-sqlite" if history else "in-memory-or-empty"}
+    except (OSError, sqlite3.Error, ValueError):
+        LOGGER.exception("Unable to read persistent process history")
+        raise HTTPException(status_code=503, detail="Process history is temporarily unavailable.")
 
 
 @app.get("/api/process-compare")

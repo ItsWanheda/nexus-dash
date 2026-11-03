@@ -41,6 +41,6 @@ jobs:
           node --check src/static/nexus-enhancements.js
           node --check src/static/network-analytics.js
       - name: Compile Python sources
-        run: python -m compileall -q server.py telemetry_store.py diagnostics.py hardware.py storage_metrics.py process_intelligence.py settings_store.py desktop_app.py network_metrics.py analytics.py terminal_service.py hardware_providers.py tests
+        run: python -m compileall -q server.py telemetry_store.py diagnostics.py hardware.py storage_metrics.py process_intelligence.py settings_store.py desktop_app.py network_metrics.py analytics.py terminal_service.py hardware_providers.py process_network.py network_quality.py anomaly_detection.py local_agent.py tests
       - name: Run tests
         run: python -m pytest -q

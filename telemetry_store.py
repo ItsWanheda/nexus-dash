@@ -779,3 +779,36 @@ class TelemetryStore:
         result = dict(row)
         result["evidence"] = json.loads(result.pop("payload"))
         return result
+
+
+    def get_recent_process_samples(self, seconds: int = 600, limit: int = 500) -> list[dict[str, Any]]:
+        cutoff = time.time() - max(60, min(int(seconds), 86400))
+        with self._lock, closing(self._connect()) as connection:
+            rows = connection.execute(
+                """SELECT sampled_epoch, pid, create_time, process_name, cpu_percent, rss_mb,
+                          threads, read_bytes, write_bytes, read_bytes_per_sec, write_bytes_per_sec
+                   FROM (
+                     SELECT sampled_epoch, pid, create_time, process_name, cpu_percent, rss_mb,
+                            threads, read_bytes, write_bytes, read_bytes_per_sec, write_bytes_per_sec
+                     FROM process_performance_samples WHERE sampled_epoch >= ?
+                     ORDER BY sampled_epoch DESC LIMIT ?
+                   ) ORDER BY sampled_epoch ASC""",
+                (cutoff, max(1, min(int(limit), 2000))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_recent_process_network(self, seconds: int = 600, limit: int = 500) -> list[dict[str, Any]]:
+        cutoff = time.time() - max(60, min(int(seconds), 86400))
+        with self._lock, closing(self._connect()) as connection:
+            rows = connection.execute(
+                """SELECT sampled_epoch, pid, process_name, upload_bytes_per_sec,
+                          download_bytes_per_sec, provider
+                   FROM (
+                     SELECT sampled_epoch, pid, process_name, upload_bytes_per_sec,
+                            download_bytes_per_sec, provider
+                     FROM process_network_samples WHERE sampled_epoch >= ?
+                     ORDER BY sampled_epoch DESC LIMIT ?
+                   ) ORDER BY sampled_epoch ASC""",
+                (cutoff, max(1, min(int(limit), 2000))),
+            ).fetchall()
+        return [dict(row) for row in rows]

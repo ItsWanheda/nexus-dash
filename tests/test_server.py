@@ -232,3 +232,27 @@ def test_network_and_analytics_endpoints_have_bounded_contracts(monkeypatch):
     assert analytics.status_code == 200
     assert {"metrics", "trend", "scorecards", "comparison", "incidents", "limitations"} <= analytics.json().keys()
     assert client.get("/api/analytics?window=forever").status_code == 400
+
+
+
+def test_persistent_process_history_and_incident_routes(monkeypatch):
+    import server
+    from telemetry_store import TelemetryStore
+    import os
+    import psutil
+    test_store = TelemetryStore(server.TELEMETRY_STORE.directory / "route-contract", sample_interval_seconds=0)
+    monkeypatch.setattr(server, "TELEMETRY_STORE", test_store)
+    created = psutil.Process(os.getpid()).create_time()
+    test_store.record_process_samples([{
+        "pid": os.getpid(), "create_time": created, "process_name": "pytest",
+        "epoch": __import__("time").time(), "cpu_percent": 2, "rss_mb": 40, "threads": 1,
+        "read_bytes": 10, "write_bytes": 20,
+    }])
+    history = client.get(f"/api/process-history?pid={os.getpid()}&create_time={created}&window=24h")
+    assert history.status_code == 200
+    assert history.json()["count"] == 1
+    capture = client.post("/api/incidents/capture", json={"title": "Manual test capture", "note": "route test"})
+    assert capture.status_code == 200
+    incident_id = capture.json()["incident"]["id"]
+    assert client.get(f"/api/incidents/{incident_id}").status_code == 200
+    assert client.get("/api/incidents?limit=10").status_code == 200

@@ -137,3 +137,44 @@ def test_network_history_returns_latest_points_in_chronological_order(tmp_path):
     assert rows[0]["bytes_sent"] == 200
     assert rows[1]["bytes_sent"] == 500
     assert rows[0]["sampled_epoch"] < rows[1]["sampled_epoch"]
+
+
+from telemetry_store import TelemetryStore
+import time
+
+
+def test_process_history_persists_identity_io_rates_and_survives_process_exit(tmp_path):
+    store = TelemetryStore(tmp_path / "process-history", sample_interval_seconds=0)
+    created = 1000.0
+    first_epoch = time.time() - 2
+    second_epoch = first_epoch + 1
+    store.record_process_samples([
+        {"pid": 42, "create_time": created, "process_name": "worker.exe",
+         "epoch": first_epoch, "cpu_percent": 10, "rss_mb": 100, "threads": 3,
+         "read_bytes": 1000, "write_bytes": 2000}
+    ])
+    store.record_process_samples([
+        {"pid": 42, "create_time": created, "process_name": "worker.exe",
+         "epoch": second_epoch, "cpu_percent": 20, "rss_mb": 120, "threads": 4,
+         "read_bytes": 3000, "write_bytes": 5000}
+    ])
+    history = store.get_process_history(42, created, 3600)
+    assert len(history) == 2
+    assert history[1]["read_bytes_per_sec"] == 2000
+    assert history[1]["write_bytes_per_sec"] == 3000
+    assert store.get_process_history(42, created + 50, 3600) == []
+
+
+def test_network_quality_history_and_incident_capture_are_bounded(tmp_path):
+    store = TelemetryStore(tmp_path / "forensics")
+    assert store.record_network_quality({
+        "host_label": "example.test", "port": 443, "status": "connected",
+        "dns_latency_ms": 12, "tcp_latency_ms": 22, "jitter_ms": 0,
+        "packet_loss_percent": 0, "success_count": 1, "failure_count": 0,
+    })
+    assert store.get_network_quality("24h")[0]["host_label"] == "example.test"
+    item = store.create_incident_capture("CPU spike", "Short summary", "warning", "test",
+                                         {"samples": [{"cpu_percent": 99}]})
+    assert item["id"] > 0
+    full = store.get_incident(item["id"])
+    assert full["evidence"]["samples"][0]["cpu_percent"] == 99
