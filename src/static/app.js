@@ -140,6 +140,7 @@ function bindEvents() {
     if (target && target.id === 'storage-history-window') { state.storageWindow = target.value; loadStorageHistory(); }
     if (target && ['alert-cpu', 'alert-ram', 'alert-disk', 'alert-consecutive'].includes(target.id)) saveRecorderSettings();
     if (window.NexusEnhancements) window.NexusEnhancements.handleChange(target);
+    if (window.NexusAssistant) window.NexusAssistant.handleChange(target);
     if (window.NexusDeepTelemetry) window.NexusDeepTelemetry.handleChange(target);
   });
   app.addEventListener('keydown', function (event) {
@@ -147,6 +148,10 @@ function bindEvents() {
     if (event.key === 'Enter' && event.target && event.target.id === 'terminal-input') {
       event.preventDefault();
       runTerminal();
+    }
+    if (event.key === 'Enter' && event.ctrlKey && event.target && event.target.id === 'sentinel-input') {
+      event.preventDefault();
+      if (window.NexusAssistant) window.NexusAssistant.handleAction('sentinel-send');
     }
   });
 }
@@ -180,6 +185,17 @@ function handleClick(event) {
   else if (action === 'hardware-refresh') loadHardware();
   else if (action === 'storage-refresh') { loadStorage(); loadStorageHistory(); }
   else if (action === 'export-diagnostic-report') exportDiagnosticReport();
+  else if (action === 'capture-incident') captureIncident();
+  else if (action === 'ask-sentinel-diagnostics') {
+    const symptom = document.getElementById('diagnostic-problem');
+    const detail = symptom && symptom.value.trim();
+    const summary = state.diagnostics && state.diagnostics.summary;
+    const question = 'Please investigate this problem using the latest NEXUS telemetry. User symptom: ' +
+      (detail || 'No extra symptom details provided.') + ' Current diagnostics summary: ' +
+      (summary || 'No diagnostic summary loaded yet.') +
+      ' Explain observed evidence, likely causes with confidence, missing evidence, and safe next steps. Do not claim an unsupported root cause.';
+    if (window.NexusAssistant) window.NexusAssistant.openWithQuestion(question);
+  } else if (action === 'view-incident') showIncidentCapture(Number(target.dataset.incidentId));
   else if (action === 'capture-incident') captureIncident();
   else if (action === 'ask-sentinel-diagnostics') {
     const symptom = document.getElementById('diagnostic-problem');
