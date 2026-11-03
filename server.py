@@ -37,6 +37,7 @@ from analytics import build_analytics_report
 from process_network import collect_process_network
 from network_quality import sample_targets
 from anomaly_detection import detect_anomalies
+from local_agent import LocalAgent, DEFAULT_MODEL as DEFAULT_ASSISTANT_MODEL
 
 LOGGER = logging.getLogger("nexus")
 ALLOWED_ORIGINS = {
@@ -52,6 +53,7 @@ PROCESS_MEMORY_TRACKER = ProcessMemoryTracker()
 STORAGE_SAMPLER = StorageSampler()
 SETTINGS_STORE = SettingsStore(TELEMETRY_STORE.directory)
 PROCESS_INTELLIGENCE = ProcessIntelligence(max_processes=50)
+LOCAL_AGENT = LocalAgent()
 NETWORK_SAMPLER = NetworkSampler()
 _NETWORK_ERROR_ACTIVE: set[str] = set()
 _NETWORK_QUALITY_FAILURES: dict[str, int] = {}
@@ -576,12 +578,83 @@ def get_anomalies(window: str = Query(default="1h")) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="Anomaly analysis is temporarily unavailable.")
 
 
+class AssistantRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    model: str | None = Field(default=None, max_length=120)
+    history: list[dict[str, str]] = Field(default_factory=list, max_length=8)
+    include_context: bool = True
+
+
 class IncidentCaptureRequest(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     note: str = Field(default="", max_length=500)
     severity: str = Field(default="info", pattern="^(info|warning|critical)$")
 
 
+
+
+def _assistant_context() -> dict[str, Any]:
+    stats = _collect_stats()
+    samples = TELEMETRY_STORE.get_history("15m", 120)
+    diagnostics = detect_anomalies(TELEMETRY_STORE.get_history("1h", 300))
+    process_samples = TELEMETRY_STORE.get_recent_process_samples(300, 100)
+    process_latest: dict[tuple[int, float], dict[str, Any]] = {}
+    for item in process_samples:
+        process_latest[(int(item["pid"]), float(item["create_time"]))] = item
+    top_processes = sorted(
+        process_latest.values(), key=lambda item: float(item.get("rss_mb") or 0), reverse=True
+    )[:12]
+    incidents = TELEMETRY_STORE.get_incidents(10)
+    quality = TELEMETRY_STORE.get_network_quality("1h", 30)
+    return {
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "current_metrics": {
+            "cpu_percent": stats.get("cpu", {}).get("percent"),
+            "ram_percent": stats.get("ram", {}).get("percent"),
+            "disk_percent": stats.get("disk", {}).get("percent"),
+        },
+        "recent_telemetry": samples[-30:],
+        "diagnostics": diagnostics,
+        "top_processes": [
+            {key: item.get(key) for key in ("pid", "process_name", "cpu_percent", "rss_mb", "threads",
+                                              "read_bytes_per_sec", "write_bytes_per_sec")}
+            for item in top_processes
+        ],
+        "network_quality_recent": quality[-10:],
+        "recent_incidents": incidents,
+        "limits": "No command lines, executable paths, passwords, tokens, remote addresses or packet content are included.",
+    }
+
+
+@app.get("/api/assistant/status")
+def get_assistant_status() -> dict[str, Any]:
+    settings = SETTINGS_STORE.get()
+    status = LOCAL_AGENT.status()
+    status["configured_model"] = settings.get("assistant_model", DEFAULT_ASSISTANT_MODEL)
+    status["agent"] = "NEXUS Sentinel"
+    return status
+
+
+@app.get("/api/assistant/models")
+def get_assistant_models() -> dict[str, Any]:
+    return LOCAL_AGENT.status()
+
+
+@app.post("/api/assistant/chat")
+def assistant_chat(payload: AssistantRequest) -> dict[str, Any]:
+    settings = SETTINGS_STORE.get()
+    model = payload.model or settings.get("assistant_model", DEFAULT_ASSISTANT_MODEL)
+    history = []
+    for item in payload.history[:8]:
+        if isinstance(item, dict) and item.get("role") in {"user", "assistant"}:
+            history.append({"role": item["role"], "content": str(item.get("content") or "")[:2000]})
+    try:
+        context = _assistant_context() if payload.include_context else None
+        result = LOCAL_AGENT.chat(payload.message.strip(), model=model, history=history, context=context)
+        return result
+    except (OSError, RuntimeError, ValueError, sqlite3.Error):
+        LOGGER.exception("NEXUS Sentinel request failed")
+        raise HTTPException(status_code=503, detail="NEXUS Sentinel could not assemble its local context.")
 @app.get("/api/incidents")
 def list_incidents(limit: int = Query(default=100, ge=1, le=250)) -> dict[str, Any]:
     return {"incidents": TELEMETRY_STORE.get_incidents(limit)}
