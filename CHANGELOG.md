@@ -4,6 +4,14 @@ All notable changes to NEXUS-DASH are recorded here. Unreleased changes are part
 
 ## [Unreleased]
 
+### Changed — Repository organization and documentation
+- Reorganized documentation into navigable guides under `docs/guides/` and architecture references under `docs/architecture/`, with a new index at `docs/README.md`.
+- Rewrote the README with a feature overview, safer setup instructions, API summary, privacy notes, documentation links and an accurate repository map.
+- Added project-structure and security-model references explaining module responsibilities, runtime entry points, trust boundaries and safe future refactors.
+- Refreshed diagnostics, Flight Recorder, hardware/storage, and Terminal/Sentinel guides with clearer sections, tables, tips, warnings and current feature behaviour.
+- Corrected the Security Policy and contributor instructions to reflect current process/network history, incident retention, optional integrations and validation commands.
+- Kept Python runtime modules and build entry points in their existing locations to preserve imports, CI and PyInstaller compatibility.
+
 ### Added — Diagnostic Terminal, Cross-Vendor Hardware, Process/Network Intelligence, Forensics and NEXUS Sentinel
 - Replaced the status-only diagnostic terminal with an explicit CMD-like allowlist for CPU/RAM, drives, process listing/inspection, network interfaces/sockets, DNS, TCP handshake and bounded ping diagnostics. Shell operators, arbitrary executables, command chaining and destructive commands remain unsupported.
 - Added AMD, NVIDIA and Intel GPU inventory through Windows WMI/Linux PCI data; added optional AMD SMI metrics on supported Linux AMDGPU/ROCm systems and Linux PCI ID name resolution for older adapters.
