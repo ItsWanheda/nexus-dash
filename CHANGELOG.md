@@ -4,6 +4,14 @@ All notable changes to NEXUS-DASH are recorded here. Unreleased changes are part
 
 ## [Unreleased]
 
+### Added — Detailed Windows GPU hardware identity
+- Added native DirectX DXGI enumeration for exact adapter description, PCI vendor/device/subsystem IDs, revision, adapter LUID, and dedicated/shared memory capacity.
+- Added Windows GPU Engine and GPU AdapterMemory performance-counter collection, matched to the adapter by LUID.
+- Expanded the hardware UI with adapter identity, driver date, video processor, display mode and memory-capacity details.
+
+### Improved
+- Windows inventory now combines DXGI identity with WMI driver/display metadata and the PCI registry fallback.
+
 ### Fixed — Vendor-neutral GPU discovery and telemetry
 - Removed NVIDIA-specific empty-state messaging and the NVIDIA-only dashboard memory summary; dashboard GPU memory now aggregates values exposed by all detected adapters.
 - Expanded GPU inventory to enumerate every Linux PCI display-class device, Windows WMI plus display-class registry fallback, and macOS system_profiler results, including adapters from vendors beyond AMD/NVIDIA/Intel.
