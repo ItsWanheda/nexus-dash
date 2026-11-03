@@ -383,9 +383,15 @@ class TelemetryStore:
                     """SELECT sampled_epoch, interface_name, bytes_sent, bytes_recv,
                               packets_sent, packets_recv, errors_in, errors_out,
                               drops_in, drops_out, is_up, speed_mbps, mtu, duplex, is_loopback
-                       FROM network_interface_samples
-                       WHERE sampled_epoch >= ? AND interface_name = ?
-                       ORDER BY sampled_epoch DESC LIMIT ?""",
+                       FROM (
+                         SELECT sampled_epoch, interface_name, bytes_sent, bytes_recv,
+                                packets_sent, packets_recv, errors_in, errors_out,
+                                drops_in, drops_out, is_up, speed_mbps, mtu, duplex, is_loopback
+                         FROM network_interface_samples
+                         WHERE sampled_epoch >= ? AND interface_name = ?
+                         ORDER BY sampled_epoch DESC LIMIT ?
+                       )
+                       ORDER BY sampled_epoch ASC""",
                     (cutoff, interface[:128], bounded_limit),
                 ).fetchall()
             else:

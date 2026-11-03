@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: '◈' },
   { id: 'processes', label: 'Processes', icon: '▤' },
   { id: 'analytics', label: 'Analytics', icon: '◉' },
+  { id: 'network', label: 'Network Intelligence', icon: '↔' },
   { id: 'hardware', label: 'Hardware', icon: '▦' },
   { id: 'storage', label: 'Storage', icon: '▧' },
   { id: 'flight-recorder', label: 'Flight Recorder', icon: '◷' },
@@ -138,6 +139,7 @@ function bindEvents() {
     if (target && target.id === 'storage-history-window') { state.storageWindow = target.value; loadStorageHistory(); }
     if (target && ['alert-cpu', 'alert-ram', 'alert-disk', 'alert-consecutive'].includes(target.id)) saveRecorderSettings();
     if (window.NexusEnhancements) window.NexusEnhancements.handleChange(target);
+    if (window.NexusDeepTelemetry) window.NexusDeepTelemetry.handleChange(target);
   });
   app.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closeMenu();
@@ -182,6 +184,7 @@ function handleClick(event) {
     renderLogs();
   } else if (action === 'terminate-process') terminateProcess(Number(target.getAttribute('data-pid')), Number(target.getAttribute('data-create-time')));
   else if (window.NexusEnhancements && window.NexusEnhancements.handleAction(action, target)) return;
+  else if (window.NexusDeepTelemetry && window.NexusDeepTelemetry.handleAction(action, target)) return;
 }
 function closeMenu() {
   const sidebar = document.getElementById('sidebar');
@@ -231,13 +234,11 @@ function renderContent() {
       '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">CONNECTION</span><h3>Local API</h3></div><span id="api-state" class="state-chip">CHECKING</span></div><p id="connection-note" class="muted">Connecting to 127.0.0.1:8000…</p><div class="divider"></div><div class="mini-facts"><span>Transport</span><strong>HTTP / loopback</strong><span>Refresh interval</span><strong>2 seconds</strong></div></section></div>';
     updateDashboard();
   } else if (state.tab === 'analytics') {
-    main.innerHTML = '<section class="page-intro"><div><div class="eyebrow">TELEMETRY / TRENDS</div><h2>Analytics</h2><p>Charts use samples collected during this browser session; no historical dataset is fabricated.</p></div></section>' +
-      '<div class="metrics-grid compact-metrics">' + metricCard('CURRENT CPU','analytics-cpu','--%','analytics-cpu-meta','CPU load','cpu') +
-      metricCard('CURRENT RAM','analytics-ram','--%','analytics-ram-meta','RAM utilisation','ram') +
-      metricCard('SAMPLES','analytics-count','0','analytics-count-meta','In this session','samples') +
-      metricCard('SAMPLE WINDOW','analytics-window','—','analytics-window-meta','Approximate duration','time') +
-      '</div><section class="panel"><div class="panel-heading"><div><span class="eyebrow">RECENT HISTORY</span><h3>CPU and memory</h3></div><span class="panel-tag">SESSION ONLY</span></div><div id="analytics-chart" class="history-chart"></div><div class="chart-legend"><span><i class="legend-dot cpu-legend"></i>CPU</span><span><i class="legend-dot ram-legend"></i>RAM</span></div></section>';
-    updateAnalytics();
+    if (window.NexusDeepTelemetry) window.NexusDeepTelemetry.renderAnalytics(main);
+    else main.innerHTML = '<section class="panel"><p class="empty-state">Historical analytics module is unavailable.</p></section>';
+  } else if (state.tab === 'network') {
+    if (window.NexusDeepTelemetry) window.NexusDeepTelemetry.renderNetwork(main);
+    else main.innerHTML = '<section class="panel"><p class="empty-state">Network telemetry module is unavailable.</p></section>';
   } else if (state.tab === 'hardware') {
     renderHardware();
   } else if (state.tab === 'storage') {
@@ -284,6 +285,7 @@ function renderContent() {
     renderLogs();
   }
   if (window.NexusEnhancements) window.NexusEnhancements.afterRender();
+  if (window.NexusDeepTelemetry) window.NexusDeepTelemetry.afterRender();
 }
 function updateDashboard() {
   const data = state.stats;
@@ -423,7 +425,7 @@ function startPolling() {
   state.hardwareTimer = null;
   state.storageTimer = null;
   state.storageHistoryTimer = null;
-  if (['dashboard', 'analytics', 'system', 'flight-recorder'].includes(state.tab)) {
+  if (['dashboard', 'system', 'flight-recorder'].includes(state.tab)) {
     fetchStats();
     state.statsTimer = window.setInterval(fetchStats, POLL_INTERVAL_MS);
   }
@@ -528,7 +530,8 @@ async function runTerminal() {
   finally { if (button) button.disabled = false; input.focus(); }
 }
 async function refreshCurrentView() {
-  if (['dashboard', 'analytics', 'system', 'flight-recorder'].includes(state.tab)) await fetchStats();
+  if (['dashboard', 'system', 'flight-recorder'].includes(state.tab)) await fetchStats();
+  if (window.NexusDeepTelemetry && ['network', 'analytics'].includes(state.tab)) await window.NexusDeepTelemetry.refreshCurrentView();
   if (state.tab === 'flight-recorder') await loadRecorderHistory();
   if (state.tab === 'diagnostics') await loadDiagnostics();
   if (state.tab === 'hardware') await loadHardware();
