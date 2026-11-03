@@ -79,7 +79,7 @@ async def enforce_local_access(request: Request, call_next):
 
 
 class TerminalRequest(BaseModel):
-    command: str = Field(min_length=1, max_length=120)
+    command: str = Field(min_length=1, max_length=256)
 
 
 class ProcessKillRequest(BaseModel):
@@ -770,47 +770,11 @@ def kill_process(payload: ProcessKillRequest) -> dict[str, Any]:
 
 @app.post("/api/terminal")
 def run_terminal_command(payload: TerminalRequest) -> dict[str, Any]:
-    """Allow exact read-only diagnostics only; never invoke a shell."""
-    command = payload.command.strip()
-    normalized = " ".join(command.split()).casefold()
-    if not normalized:
-        raise HTTPException(status_code=400, detail="Enter a diagnostic command.")
-    if any(char in command for char in (";", "|", "&", ">", "<", "$", "\u0000", "\n", "\r")):
-        raise HTTPException(status_code=400, detail="Shell operators and multi-line commands are not supported.")
-
-    if normalized == "help":
-        return _terminal("Available read-only diagnostics:\n"
-                         "  help             Show this help\n  date             Show local date and time\n"
-                         "  hostname         Show hostname\n  whoami           Show current OS user\n"
-                         "  uptime           Show system uptime\n  platform         Show OS and Python details\n"
-                         "  cpu              Show CPU usage and core counts\n  memory           Show RAM usage\n"
-                         "  python --version Show Python version\n  status           Show a compact system summary\n"
-                         "This console does not execute arbitrary shell commands.")
-    if normalized == "date":
-        return _terminal(datetime.now().astimezone().isoformat(timespec="seconds"))
-    if normalized == "hostname":
-        return _terminal(platform.node() or "Unknown")
-    if normalized == "whoami":
-        return _terminal(getpass.getuser())
-    if normalized == "uptime":
-        return _terminal(_format_uptime(time.time() - psutil.boot_time()))
-    if normalized == "platform":
-        return _terminal(f"{platform.system()} {platform.release()} ({platform.machine()})\nPython {platform.python_version()}")
-    if normalized == "cpu":
-        return _terminal(f"CPU usage: {psutil.cpu_percent(interval=0.1):.1f}%\n"
-                         f"Logical cores: {psutil.cpu_count(logical=True) or 0}\n"
-                         f"Physical cores: {psutil.cpu_count(logical=False) or 0}")
-    if normalized == "memory":
-        memory = psutil.virtual_memory()
-        return _terminal(f"RAM: {memory.used / (1024 ** 3):.2f} / {memory.total / (1024 ** 3):.2f} GiB ({memory.percent:.1f}%)")
-    if normalized == "python --version":
-        return _terminal(f"Python {platform.python_version()}")
-    if normalized == "status":
-        memory = psutil.virtual_memory()
-        return _terminal(f"Host: {platform.node() or 'Unknown'}\nOS: {platform.system()} {platform.release()}\n"
-                         f"CPU: {psutil.cpu_percent(interval=0.1):.1f}%\nRAM: {memory.percent:.1f}%\n"
-                         f"Uptime: {_format_uptime(time.time() - psutil.boot_time())}")
-    raise HTTPException(status_code=400, detail="Command not allowed. Type 'help' for supported read-only diagnostics.")
+    from terminal_service import execute_terminal_command
+    result = execute_terminal_command(payload.command)
+    if result["returncode"] == 2:
+        raise HTTPException(status_code=400, detail=result["stderr"] or "Command not allowed.")
+    return result
 
 
 if __name__ == "__main__":
