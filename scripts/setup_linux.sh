@@ -26,6 +26,9 @@ if ! command -v sudo >/dev/null 2>&1; then
 fi
 SUDO=(sudo)
 
+echo "Refreshing apt package indexes..."
+"${SUDO[@]}" apt-get update
+
 WEBKIT_VERSION=""
 for version in 4.1 4.0; do
   if apt-cache show "libwebkit2gtk-$version-0" >/dev/null 2>&1 &&
@@ -40,7 +43,6 @@ if [[ -z "$WEBKIT_VERSION" ]]; then
 fi
 
 echo "Installing GTK/WebKit system dependencies (WebKitGTK $WEBKIT_VERSION)..."
-"${SUDO[@]}" apt-get update
 "${SUDO[@]}" apt-get install -y \
   python3 python3-venv python3-pip python3-gi python3-gi-cairo \
   gir1.2-gtk-3.0 "libwebkit2gtk-$WEBKIT_VERSION-0" "gir1.2-webkit2-$WEBKIT_VERSION"
