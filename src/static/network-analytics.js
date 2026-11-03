@@ -22,7 +22,7 @@
       '<section class="page-intro"><div><div class="eyebrow">NETWORK / INTERFACE OBSERVABILITY</div><h2>Network Intelligence</h2><p>Per-interface throughput, packet errors, link state, live sockets, process attribution and user-triggered connectivity diagnostics.</p></div><button class="secondary-button" data-action="network-refresh" type="button">↻ Refresh</button></section>'+
       '<div class="network-summary-grid" id="network-summary">'+fact('Interfaces','—')+fact('Connected','—')+fact('Upload','—')+fact('Download','—')+'</div>'+
       '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">LINKS / COUNTERS</span><h3>Network interfaces</h3></div><span id="network-state" class="panel-tag">LOADING</span></div><div class="table-scroll"><table class="network-table"><thead><tr><th>Interface</th><th>Link</th><th>Speed</th><th>Upload</th><th>Download</th><th>Errors</th><th>Drops</th></tr></thead><tbody id="network-interface-rows"><tr><td colspan="7" class="table-message">Loading counters…</td></tr></tbody></table></div><p class="table-note">Initial rate readings warm up after service start or adapter reconnect. IP and MAC addresses are not collected or stored.</p></section>'+
-      '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">HISTORY / TRAFFIC</span><h3>Upload and download</h3></div><div class="network-history-controls"><select id="network-history-window" class="flight-select"><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h" selected>24 hours</option><option value="7d">7 days</option><option value="30d">30 days</option></select><button class="text-button" data-action="network-history-refresh" type="button">Refresh history</button></div></div><div id="network-history-chart" class="deep-chart"><p class="empty-state">Loading history…</p></div><div class="deep-chart-legend"><span class="upload-legend">Upload</span><span class="download-legend">Download</span></div></section>'+
+      '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">HISTORY / TRAFFIC</span><h3>Upload and download</h3></div><div class="network-history-controls"><select id="network-history-window" class="flight-select"><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h" selected>24 hours</option><option value="7d">7 days</option><option value="30d">30 days</option></select><button class="text-button" data-action="network-history-refresh" type="button">Refresh history</button></div></div><div id="network-history-chart" class="deep-chart"><p class="empty-state">Loading history…</p></div><p class="table-note">This chart uses bounded aggregate system traffic buckets across the full selected window. Per-interface counters are shown above and summarized in Advanced Analytics.</p><div class="deep-chart-legend"><span class="upload-legend">Upload</span><span class="download-legend">Download</span></div></section>'+
       '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">LIVE SOCKET TABLE</span><h3>Connections and process attribution</h3></div><button class="text-button" data-action="network-connections-refresh" type="button">↻ Refresh connections</button></div><div class="connection-options"><label><input id="network-reveal-addresses" type="checkbox"> Reveal local and remote IP addresses for this view</label><span id="network-connection-status" class="panel-tag">LOADING</span></div><div id="network-connection-summary" class="connection-summary"></div><div class="table-scroll"><table class="network-table"><thead><tr><th>Process</th><th>PID</th><th>Protocol</th><th>State</th><th>Local port</th><th>Remote endpoint</th></tr></thead><tbody id="network-connection-rows"><tr><td colspan="6" class="table-message">Loading connections…</td></tr></tbody></table></div><p class="table-note">Socket data is live-only and never written to the recorder. IP addresses stay hidden unless explicitly revealed. Permissions may limit visibility.</p></section>'+
       '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">ON-DEMAND PROBE</span><h3>DNS and TCP connectivity</h3></div><span class="panel-tag">USER INITIATED</span></div><p class="muted">Resolve a host and perform up to three TCP handshakes. No HTTP request or application payload is sent. The target is not saved.</p><div class="network-probe-form"><label>Hostname or IP<input id="network-probe-host" type="text" maxlength="253" placeholder="example.com" autocomplete="off" spellcheck="false"></label><label>TCP port<input id="network-probe-port" type="number" min="1" max="65535" value="443"></label><button class="primary-button" data-action="network-diagnose" type="button">Run test</button></div><div id="network-probe-result" class="network-probe-result" aria-live="polite"></div></section>';
     loadNetwork(); loadConnections(); loadNetworkHistory();
@@ -73,25 +73,21 @@
     const target=el('network-history-chart');if(!target)return;
     const windowName=el('network-history-window')?el('network-history-window').value:'24h';
     try {
-      const data=await api('/network/history?window='+encodeURIComponent(windowName)+'&limit=600');
-      const grouped=new Map();
-      (data.samples||[]).forEach(item=>{
-        if(item.sent_bytes_per_sec===null||item.received_bytes_per_sec===null)return;
-        const time=Math.round(Number(item.sampled_epoch));
-        const point=grouped.get(time)||{upload:0,download:0};
-        point.upload+=Number(item.sent_bytes_per_sec)||0;point.download+=Number(item.received_bytes_per_sec)||0;
-        grouped.set(time,point);
-      });
-      const points=Array.from(grouped.entries()).sort((a,b)=>a[0]-b[0]).slice(-120);
-      if(!points.length){target.innerHTML='<p class="empty-state">Waiting for at least two stored interface samples. Rates are not fabricated.</p>';return;}
-      const max=Math.max(1,...points.map(x=>Math.max(x[1].upload,x[1].download)));
-      target.innerHTML='<div class="network-history-bars">'+points.map(x=>{
-        const up=Math.max(1,x[1].upload/max*100),down=Math.max(1,x[1].download/max*100);
-        return '<div class="network-history-column" title="'+esc(new Date(x[0]*1000).toLocaleString())+' · ↑ '+esc(rate(x[1].upload))+' · ↓ '+esc(rate(x[1].download))+'"><i class="network-upload-bar" style="height:'+up.toFixed(1)+'%"></i><i class="network-download-bar" style="height:'+down.toFixed(1)+'%"></i></div>';
-      }).join('')+'</div><div class="chart-axis"><span>Older</span><span>Latest</span></div>';
+      const report=await api('/analytics?window='+encodeURIComponent(windowName)+'&compare_previous=false');
+      const points=(report.trend||[]).filter(item=>
+        Number.isFinite(Number(item.network_upload_average))&&Number.isFinite(Number(item.network_download_average))
+      ).slice(-120);
+      if(!points.length){target.innerHTML='<p class="empty-state">No complete network rate pairs have been recorded across this window yet.</p>';return;}
+      const max=Math.max(1,...points.map(item=>Math.max(Number(item.network_upload_average),Number(item.network_download_average))));
+      target.innerHTML='<div class="network-history-bars">'+points.map(item=>{
+        const up=Math.max(1,Number(item.network_upload_average)/max*100);
+        const down=Math.max(1,Number(item.network_download_average)/max*100);
+        return '<div class="network-history-column" title="'+esc(new Date(item.epoch*1000).toLocaleString())+
+          ' · ↑ '+esc(rate(item.network_upload_average))+' · ↓ '+esc(rate(item.network_download_average))+
+          '"><i class="network-upload-bar" style="height:'+up.toFixed(1)+'%"></i><i class="network-download-bar" style="height:'+down.toFixed(1)+'%"></i></div>';
+      }).join('')+'</div><div class="chart-axis"><span>'+esc(new Date(points[0].epoch*1000).toLocaleString())+'</span><span>'+esc(new Date(points[points.length-1].epoch*1000).toLocaleString())+'</span></div>';
     } catch(error){target.innerHTML='<p class="empty-state error-text">'+esc(error.message)+'</p>';}
   }
-
   async function diagnose() {
     const host=el('network-probe-host'),port=el('network-probe-port'),target=el('network-probe-result');
     if(!host||!port||!target||!host.value.trim()){if(target)target.textContent='Enter a hostname or IP address first.';return;}
