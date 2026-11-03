@@ -17,7 +17,7 @@ NEXUS discovers display adapters independently of their live sensor providers. I
 
 | Platform | Inventory source | Additional live telemetry |
 | --- | --- | --- |
-| Windows | WMI `Win32_VideoController`, with Windows PCI device-registry fallback | NVIDIA NVML where supported; LibreHardwareMonitor WMI readings for supported AMD, NVIDIA and Intel devices |
+| Windows | DirectX DXGI adapter enumeration (model, PCI IDs, subsystem, revision, LUID and dedicated/shared memory) merged with WMI driver/display metadata; PCI device-registry fallback | Windows GPU Engine/AdapterMemory counters keyed by DXGI LUID; NVIDIA NVML where supported; LibreHardwareMonitor WMI readings for supported AMD, NVIDIA and Intel devices |
 | Linux | All PCI display-class devices from `/sys/bus/pci/devices`; vendor/device names from local `pci.ids` when installed | Generic DRM/sysfs counters (driver-dependent); AMD SMI on supported AMDGPU/ROCm systems; NVIDIA NVML |
 | macOS | Built-in `system_profiler SPDisplaysDataType -json` inventory | Values exposed by the operating system or a compatible installed provider |
 
@@ -28,7 +28,9 @@ GPU **identification** and **live measurements** are separate:
 - When available, Linux DRM/sysfs counters can expose GPU busy percentage, VRAM use/capacity, temperature, power, clock and fan readings.
 - AMD SMI provides additional readings on supported Linux AMDGPU/ROCm systems. AMD SMI is not required for AMD device identification.
 - NVIDIA NVML provides additional NVIDIA measurements when its driver and Python binding are available.
-- On Windows, LibreHardwareMonitor can provide supported per-device load, temperature, power, clock, fan and memory readings across multiple GPU vendors. Matchable sensor names are attached to the corresponding adapter rather than being reported as a separate GPU.
+- On Windows, DXGI supplies the adapter model, PCI vendor/device/subsystem IDs, revision, dedicated/shared memory capacities and adapter LUID. WMI adds driver version/date, video processor and active display mode.
+- On supported Windows 10/11 graphics drivers, GPU Engine and GPU AdapterMemory performance counters can expose per-adapter utilisation and dedicated/shared memory use. NEXUS matches these counters by DXGI LUID, not vendor name.
+- LibreHardwareMonitor can provide additional per-device load, temperature, power, clock, fan and memory readings across multiple GPU vendors. Matchable sensor names are attached to the corresponding adapter rather than being reported as a separate GPU.
 - Multiple adapters from the same vendor are retained. Live readings are merged by PCI address/device identity or an unambiguous model match, never by vendor name alone.
 
 Install optional Python bindings:
@@ -74,7 +76,7 @@ Install the operating-system smartmontools package so `smartctl` is available. R
 
 | Platform | Identification | Optional live sensor providers |
 | --- | --- | --- |
-| Windows | WMI plus PCI device-registry fallback for display adapters; WMI for system/baseboard/BIOS | NVML for NVIDIA; LibreHardwareMonitor WMI for supported GPU/board sensors; ACPI thermal zones; optional SMART |
+| Windows | DXGI + WMI + PCI device-registry fallback for display adapters; WMI for system/baseboard/BIOS | GPU Engine/AdapterMemory counters keyed by DXGI LUID; NVML for NVIDIA; LibreHardwareMonitor WMI for supported GPU/board sensors; ACPI thermal zones; optional SMART |
 | Linux | SMBIOS/DMI and all PCI display-class devices, including local pci.ids vendor/device lookup | DRM/sysfs counters where exposed; AMD SMI on supported AMDGPU/ROCm; NVML for NVIDIA; kernel hwmon temperatures/fans; optional SMART |
 | macOS | Built-in system_profiler display-adapter inventory; conventional baseboard identification is generally unavailable | GPU/fan metrics depend on OS/provider exposure; psutil sensors; optional SMART |
 

@@ -81,10 +81,22 @@ async function loadHardware() {
             (device.driver ? '<span>Driver ' + escapeHTML(device.driver) + '</span>' : '') +
             (device.driver_version ? '<span>Driver version ' + escapeHTML(device.driver_version) + '</span>' : '') +
             (device.vendor_id ? '<span>Vendor ID ' + escapeHTML(device.vendor_id) + '</span>' : '') +
+            (device.device_id ? '<span>Device ID ' + escapeHTML(device.device_id) + '</span>' : '') +
+            (device.subsystem_vendor_id ? '<span>Subsystem vendor ' + escapeHTML(device.subsystem_vendor_id) + '</span>' : '') +
+            (device.subsystem_device_id ? '<span>Subsystem device ' + escapeHTML(device.subsystem_device_id) + '</span>' : '') +
+            (device.revision ? '<span>Revision ' + escapeHTML(device.revision) + '</span>' : '') +
+            (device.adapter_type ? '<span>Adapter type ' + escapeHTML(device.adapter_type) + '</span>' : '') +
+            (device.video_processor ? '<span>Video processor ' + escapeHTML(device.video_processor) + '</span>' : '') +
+            (device.driver_date ? '<span>Driver date ' + escapeHTML(device.driver_date) + '</span>' : '') +
+            (device.current_resolution ? '<span>Display ' + escapeHTML(device.current_resolution) +
+              (device.current_refresh_rate_hz ? ' @ ' + escapeHTML(device.current_refresh_rate_hz) + ' Hz' : '') + '</span>' : '') +
+            (device.adapter_luid ? '<span>Adapter LUID ' + escapeHTML(device.adapter_luid) + '</span>' : '') +
             (device.pci_address ? '<span>PCI ' + escapeHTML(device.pci_address) + '</span>' : '') + '</div><div class="telemetry-reading-list">' +
             hardwareReadingRow('GPU utilisation', device.utilization_percent) +
             hardwareReadingRow('VRAM used', device.memory_used_gb) +
-            hardwareReadingRow('VRAM total', device.memory_total_gb) +
+            hardwareReadingRow('VRAM total (live)', device.memory_total_gb) +
+            hardwareReadingRow('Dedicated VRAM capacity (DXGI)', device.dedicated_video_memory_gb === null || device.dedicated_video_memory_gb === undefined ? null : { value: device.dedicated_video_memory_gb, unit: 'GiB', status: 'Available' }) +
+            hardwareReadingRow('Shared GPU memory capacity', device.shared_system_memory_gb === null || device.shared_system_memory_gb === undefined ? null : { value: device.shared_system_memory_gb, unit: 'GiB', status: 'Available' }) +
             hardwareReadingRow('Temperature', device.temperature_c) +
             hardwareReadingRow('Power draw', device.power_w) +
             hardwareReadingRow('Graphics clock', device.graphics_clock_mhz, 0) +
