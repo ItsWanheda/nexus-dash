@@ -159,7 +159,7 @@ def run_desktop(minimized: bool = False) -> int:
             background_color="#080c09",
             hidden=hide_on_start,
         )
-        icon = _create_tray(window)
+        icon = _create_tray(window) if platform.system() == "Windows" else None
         if icon is not None:
             threading.Thread(target=icon.run, name="nexus-tray", daemon=True).start()
 
