@@ -1,4 +1,4 @@
-from telemetry_store import TelemetryStore
+from nexus_dash.services.telemetry_store import TelemetryStore
 
 
 def sample(cpu=22.5, ram=41.0):
@@ -139,7 +139,7 @@ def test_network_history_returns_latest_points_in_chronological_order(tmp_path):
     assert rows[0]["sampled_epoch"] < rows[1]["sampled_epoch"]
 
 
-from telemetry_store import TelemetryStore
+from nexus_dash.services.telemetry_store import TelemetryStore
 import time
 
 

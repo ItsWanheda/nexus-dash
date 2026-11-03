@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from network_metrics import diagnose_tcp_connectivity
+from .network_metrics import diagnose_tcp_connectivity
 
 
 def sample_targets(targets: list[dict[str, Any]]) -> list[dict[str, Any]]:

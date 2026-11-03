@@ -1,4 +1,4 @@
-from network_metrics import NetworkSampler, _normalize_host, build_network_history_points, diagnose_tcp_connectivity
+from nexus_dash.services.network_metrics import NetworkSampler, _normalize_host, build_network_history_points, diagnose_tcp_connectivity
 
 
 def test_network_sampler_returns_interface_capabilities_without_addresses():
@@ -38,7 +38,7 @@ def test_network_host_validation_rejects_urls_and_paths():
 
 
 def test_network_connectivity_probe_is_bounded_and_reports_attempts(monkeypatch):
-    import network_metrics
+    from nexus_dash.services import network_metrics
     monkeypatch.setattr(network_metrics.socket, "getaddrinfo", lambda *args, **kwargs: [
         (network_metrics.socket.AF_INET, network_metrics.socket.SOCK_STREAM, 0, "", ("127.0.0.1", 9))
     ])

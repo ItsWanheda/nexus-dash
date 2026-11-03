@@ -1,4 +1,4 @@
-from hardware import _reading, collect_hardware
+from nexus_dash.services.hardware import _reading, collect_hardware
 
 
 def test_missing_hardware_measurement_is_explicitly_unavailable():
@@ -18,7 +18,7 @@ def test_hardware_snapshot_has_stable_component_groups():
     assert result["battery"]["charge_cycles"]["status"] == "Unavailable"
 
 
-from hardware_providers import collect_gpu_inventory, collect_system_inventory, collect_linux_hwmon, collect_lhm_sensors
+from nexus_dash.services.hardware_providers import collect_gpu_inventory, collect_system_inventory, collect_linux_hwmon, collect_lhm_sensors
 
 
 def test_system_inventory_has_sanitised_fields():

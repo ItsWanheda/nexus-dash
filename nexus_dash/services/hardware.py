@@ -13,7 +13,7 @@ from typing import Any
 
 import psutil
 
-from hardware_providers import (
+from .hardware_providers import (
     collect_system_inventory,
     collect_gpu_inventory,
     collect_amd_smi_devices,

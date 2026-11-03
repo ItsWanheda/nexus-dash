@@ -275,36 +275,36 @@ Start with the [documentation index](docs/README.md).
 
 ```text
 nexus-dash/
-├── .github/                 # CI, Windows packaging workflow and issue templates
-├── docs/
-│   ├── architecture/        # Architecture and security design notes
-│   └── guides/              # User and feature guides
-├── src/
-│   ├── img/                 # Dashboard preview assets
-│   ├── static/              # Vanilla JavaScript modules
-│   └── style/               # Application styles
-├── tests/                   # Backend and API tests
-├── installer/               # Inno Setup installer recipe
-├── scripts/                 # Build and maintenance scripts
-├── server.py                # FastAPI application entry point
-├── desktop_app.py            # Windows desktop/tray entry point
-├── telemetry_store.py       # SQLite telemetry and retention
-├── diagnostics.py            # Evidence-based diagnostics
-├── hardware*.py             # Hardware inventory and providers
-├── storage_metrics.py       # Storage sampling and SMART queries
-├── process_*.py             # Process inspection and network attribution
-├── network_*.py              # Interface and network-quality sampling
-├── analytics.py              # Historical analytics
-├── anomaly_detection.py     # Adaptive anomaly detection
-├── terminal_service.py      # Restricted diagnostic command grammar
-├── local_agent.py            # Local Ollama assistant integration
-├── settings_store.py        # Validated local settings
+├── nexus_dash/
+│   ├── api/
+│   │   └── server.py          # FastAPI app, middleware and route composition
+│   ├── desktop/
+│   │   └── app.py             # Windows PyWebView and system-tray shell
+│   └── services/
+│       ├── telemetry_store.py # SQLite history, incidents and retention
+│       ├── diagnostics.py     # Evidence-based diagnostics and OS events
+│       ├── hardware*.py       # Hardware collection and optional providers
+│       ├── storage_metrics.py # Disk activity and optional SMART queries
+│       ├── process_*.py       # Process intelligence and network attribution
+│       ├── network_*.py       # Interface, connectivity and quality metrics
+│       ├── analytics.py       # Historical analytics and scorecards
+│       ├── anomaly_detection.py
+│       ├── terminal_service.py# Restricted diagnostic command grammar
+│       ├── local_agent.py     # Local Ollama assistant integration
+│       └── settings_store.py  # Validated local settings
+├── src/                      # Browser assets (JS, CSS and images)
+├── tests/                    # Backend and API tests
+├── docs/                     # Architecture references and feature guides
+├── installer/                # Inno Setup installer recipe
+├── scripts/                  # Build and maintenance scripts
+├── server.py                 # Backward-compatible ASGI/CLI entry point
+├── desktop_app.py            # Backward-compatible desktop launcher
 ├── index.html                # Dashboard document
 ├── NEXUS-DASH.spec           # PyInstaller build configuration
 └── requirements*.txt         # Runtime, development and optional dependencies
 ```
 
-> 🧭 **Why are backend modules at the repository root?** The current API, desktop runtime, tests and PyInstaller spec import these modules directly. Keeping these stable entry points avoids a risky package migration during a feature release. The architecture guide documents their responsibilities and the conditions for a future migration.
+> 🧭 **Compatibility note:** application code now lives in the `nexus_dash` package. The root `server.py` and `desktop_app.py` files remain as thin compatibility launchers, preserving `python server.py`, `python desktop_app.py`, and the `server:app` ASGI target.
 
 ## 🧪 Development and validation
 
@@ -336,7 +336,7 @@ node --check src/static/assistant.js
 Compile backend and test sources:
 
 ```bash
-python -m compileall -q server.py telemetry_store.py diagnostics.py hardware.py hardware_providers.py storage_metrics.py process_intelligence.py settings_store.py desktop_app.py network_metrics.py analytics.py terminal_service.py process_network.py network_quality.py anomaly_detection.py local_agent.py tests
+python -m compileall -q nexus_dash tests server.py desktop_app.py
 ```
 
 CI checks Python 3.10–3.13, frontend JavaScript syntax, Python compilation and pytest. Physical hardware sensor coverage and interactive Windows window/tray behaviour still require manual testing on representative machines.

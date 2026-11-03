@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from anomaly_detection import detect_anomalies
-from local_agent import LocalAgent, OllamaUnavailable, DEFAULT_MODEL
-from network_quality import assess_quality_sample, sample_targets
-from process_network import collect_process_network, parse_nethogs_trace
-from settings_store import SettingsStore
+from nexus_dash.services.anomaly_detection import detect_anomalies
+from nexus_dash.services.local_agent import LocalAgent, OllamaUnavailable, DEFAULT_MODEL
+from nexus_dash.services.network_quality import assess_quality_sample, sample_targets
+from nexus_dash.services.process_network import collect_process_network, parse_nethogs_trace
+from nexus_dash.services.settings_store import SettingsStore
 
 
 def test_nethogs_trace_parser_returns_process_rates_without_executable_paths():
@@ -25,7 +25,7 @@ def test_nethogs_trace_parser_returns_process_rates_without_executable_paths():
 
 
 def test_process_network_provider_reports_unsupported_windows_without_faking_rates(monkeypatch):
-    import process_network
+    from nexus_dash.services import process_network
     monkeypatch.setattr(process_network.platform, "system", lambda: "Windows")
     result = collect_process_network()
     assert result["status"] == "unsupported"
@@ -72,7 +72,7 @@ def test_network_quality_flags_persistent_latency_and_dns_failures():
 
 
 def test_sample_targets_reports_real_tcp_and_dns_metrics(monkeypatch):
-    import network_quality
+    from nexus_dash.services import network_quality
     monkeypatch.setattr(network_quality, "diagnose_tcp_connectivity", lambda host, port, attempts: {
         "status": "connected", "dns_latency_ms": 11.5,
         "tcp_latency_ms": {"average": 30.0, "jitter": 4.0},

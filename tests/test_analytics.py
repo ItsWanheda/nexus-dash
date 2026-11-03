@@ -1,4 +1,4 @@
-from analytics import build_analytics_report
+from nexus_dash.services.analytics import build_analytics_report
 
 
 def test_analytics_calculates_percentiles_scorecards_comparison_and_incidents():

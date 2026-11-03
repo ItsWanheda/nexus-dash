@@ -10,7 +10,9 @@ All notable changes to NEXUS-DASH are recorded here. Unreleased changes are part
 - Added project-structure and security-model references explaining module responsibilities, runtime entry points, trust boundaries and safe future refactors.
 - Refreshed diagnostics, Flight Recorder, hardware/storage, and Terminal/Sentinel guides with clearer sections, tables, tips, warnings and current feature behaviour.
 - Corrected the Security Policy and contributor instructions to reflect current process/network history, incident retention, optional integrations and validation commands.
-- Kept Python runtime modules and build entry points in their existing locations to preserve imports, CI and PyInstaller compatibility.
+- Moved Python implementation modules into the `nexus_dash` package, separating API composition, desktop integration and reusable services.
+- Kept `server.py` and `desktop_app.py` as compatibility launchers for existing CLI commands and the historical `server:app` ASGI target.
+- Updated package imports, tests, CI compilation paths, project-structure documentation and desktop asset resolution for the new layout.
 
 ### Added — Diagnostic Terminal, Cross-Vendor Hardware, Process/Network Intelligence, Forensics and NEXUS Sentinel
 - Replaced the status-only diagnostic terminal with an explicit CMD-like allowlist for CPU/RAM, drives, process listing/inspection, network interfaces/sockets, DNS, TCP handshake and bounded ping diagnostics. Shell operators, arbitrary executables, command chaining and destructive commands remain unsupported.

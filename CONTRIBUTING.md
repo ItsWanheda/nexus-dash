@@ -95,7 +95,7 @@ node --check src/static/assistant.js
 Compile Python modules and tests:
 
 ```bash
-python -m compileall -q server.py telemetry_store.py diagnostics.py hardware.py hardware_providers.py storage_metrics.py process_intelligence.py settings_store.py desktop_app.py network_metrics.py analytics.py terminal_service.py process_network.py network_quality.py anomaly_detection.py local_agent.py tests
+python -m compileall -q nexus_dash tests server.py desktop_app.py
 ```
 
 For relevant changes, also verify:

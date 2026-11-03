@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from diagnostics import ProcessMemoryTracker, analyse_diagnostics
+from nexus_dash.services.diagnostics import ProcessMemoryTracker, analyse_diagnostics
 
 def iso(minutes_ago=0):
     return (datetime.now(timezone.utc)-timedelta(minutes=minutes_ago)).isoformat()

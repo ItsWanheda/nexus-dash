@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from storage_metrics import StorageSampler, counter_rate
+from nexus_dash.services.storage_metrics import StorageSampler, counter_rate
 
 
 def test_counter_rate_requires_two_valid_samples_and_clamps_resets():

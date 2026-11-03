@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from server import app
+from nexus_dash.api.server import app
 
 client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 54321))
 
@@ -206,7 +206,7 @@ def test_desktop_module_imports_without_optional_gui_dependencies():
 
 
 def test_settings_retention_downsamples_within_sample_cap(tmp_path):
-    from settings_store import SettingsStore
+    from nexus_dash.services.settings_store import SettingsStore
     saved = SettingsStore(tmp_path).update({"sampling_interval_seconds": 5, "retention_days": 30})
     assert saved["effective_sampling_interval_seconds"] >= 130
     assert "20,000 samples" in saved["retention_note"]
@@ -219,8 +219,8 @@ def test_health_exposes_desktop_runtime_as_boolean():
 
 
 def test_network_and_analytics_endpoints_have_bounded_contracts(monkeypatch):
-    import server
-    from network_metrics import NetworkSampler
+    import nexus_dash.api.server as server
+    from nexus_dash.services.network_metrics import NetworkSampler
     monkeypatch.setattr(server, "NETWORK_SAMPLER", NetworkSampler())
     network = client.get("/api/network")
     assert network.status_code == 200
@@ -239,8 +239,8 @@ def test_network_and_analytics_endpoints_have_bounded_contracts(monkeypatch):
 
 
 def test_persistent_process_history_and_incident_routes(monkeypatch):
-    import server
-    from telemetry_store import TelemetryStore
+    import nexus_dash.api.server as server
+    from nexus_dash.services.telemetry_store import TelemetryStore
     import os
     import psutil
     test_store = TelemetryStore(server.TELEMETRY_STORE.directory / "route-contract", sample_interval_seconds=0)

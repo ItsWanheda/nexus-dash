@@ -13,7 +13,7 @@ from typing import Any
 
 import psutil
 
-from network_metrics import collect_connections, diagnose_tcp_connectivity, _normalize_host
+from .network_metrics import collect_connections, diagnose_tcp_connectivity, _normalize_host
 
 MAX_OUTPUT = 12_000
 MAX_PROCESSES = 50
@@ -269,7 +269,7 @@ def execute_terminal_command(command: str) -> dict[str, Any]:
             return _result(f"Python {platform.python_version()}")
         if name == "hardware" and not args:
             try:
-                from hardware import collect_hardware
+                from .hardware import collect_hardware
                 payload = collect_hardware()
                 board = payload.get("motherboard", {}).get("identity", {})
                 system = payload.get("system", {})
