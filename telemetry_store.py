@@ -376,7 +376,7 @@ class TelemetryStore:
         if window not in WINDOW_SECONDS:
             raise ValueError("Unsupported network history window.")
         cutoff = time.time() - WINDOW_SECONDS[window]
-        bounded_limit = max(1, min(int(limit_per_interface), 2000))
+        bounded_limit = max(1, min(int(limit_per_interface), 20_000))
         with self._lock, closing(self._connect()) as connection:
             if interface is not None:
                 rows = connection.execute(

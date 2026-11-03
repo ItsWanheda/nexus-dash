@@ -283,11 +283,15 @@ def build_analytics_report(
         storage_status = "intermittent-pressure"
     network_errors = network_current["error_delta_count"] + network_current["drop_delta_count"]
     non_loopback_rows = [row for row in network_rows if not bool(row.get("is_loopback"))]
+    non_loopback_sample_times = {
+        float(row["sampled_epoch"]) for row in non_loopback_rows
+        if _number(row.get("sampled_epoch")) is not None
+    }
     network_card = {
         "key": "network", "title": "Network stability",
-        "status": "insufficient-data" if len(non_loopback_rows) < 3 else
+        "status": "insufficient-data" if len(non_loopback_sample_times) < 3 else
                   ("intermittent-pressure" if network_errors else "no-observed-errors"),
-        "samples": len(non_loopback_rows), "errors": network_current["error_delta_count"],
+        "samples": len(non_loopback_sample_times),
         "drops": network_current["drop_delta_count"], "link_up_percent": network_current["link_up_percent"],
     }
     categories = Counter(str(event.get("category") or "system") for event in events)

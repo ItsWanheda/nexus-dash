@@ -623,7 +623,7 @@ def get_analytics(
     }
     try:
         history = TELEMETRY_STORE.get_analytics_history(window, compare_previous=compare_previous)
-        network_rows = TELEMETRY_STORE.get_network_history(window, limit_per_interface=2000)
+        network_rows = TELEMETRY_STORE.get_network_history(window, limit_per_interface=20_000)
         events = TELEMETRY_STORE.get_events(window, limit=2000)
         return build_analytics_report(
             history["current"], history["previous"], network_rows, events,
