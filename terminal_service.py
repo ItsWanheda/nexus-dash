@@ -213,7 +213,7 @@ def execute_terminal_command(command: str) -> dict[str, Any]:
                 "  python --version                 Python runtime\n"
                 "  date | hostname | whoami | uptime\n"
                 "Examples: processes 15 sort=memory · process 1234 · tcp example.com 443\n"
-                "No unrestricted shell, command chaining, or destructive commands are supported."
+                "NEXUS does not execute arbitrary shell commands. No unrestricted shell, command chaining, or destructive commands are supported."
             )
         if name in {"date", "time"} and not args:
             return _result(time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime()))

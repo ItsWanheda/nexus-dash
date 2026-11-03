@@ -35,6 +35,9 @@ def test_terminal_help_only_describes_diagnostics():
     assert response.status_code == 200
     assert "uptime" in response.json()["stdout"]
     assert "does not execute arbitrary shell" in response.json()["stdout"]
+    assert "processes [limit]" in response.json()["stdout"]
+    assert "dns <hostname>" in response.json()["stdout"]
+    assert "shell" in response.json()["stdout"].lower()
 
 
 def test_terminal_rejects_arbitrary_shell_command():
@@ -48,7 +51,7 @@ def test_terminal_rejects_shell_operators():
 
 
 def test_terminal_rejects_oversized_input():
-    assert client.post("/api/terminal", json={"command": "x" * 121}).status_code == 422
+    assert client.post("/api/terminal", json={"command": "x" * 257}).status_code == 422
 
 
 def test_unapproved_browser_origin_is_rejected():
@@ -256,3 +259,24 @@ def test_persistent_process_history_and_incident_routes(monkeypatch):
     incident_id = capture.json()["incident"]["id"]
     assert client.get(f"/api/incidents/{incident_id}").status_code == 200
     assert client.get("/api/incidents?limit=10").status_code == 200
+
+
+
+def test_terminal_executes_real_read_only_local_commands():
+    for command in ("cpu", "memory", "drives", "interfaces", "uptime", "processes 5 sort=memory"):
+        response = client.post("/api/terminal", json={"command": command})
+        assert response.status_code == 200, (command, response.text)
+        assert isinstance(response.json().get("stdout"), str)
+        assert response.json()["returncode"] == 0
+
+
+def test_terminal_process_inspector_reports_current_process():
+    import os
+    response = client.post("/api/terminal", json={"command": f"process {os.getpid()}"})
+    assert response.status_code == 200
+    assert f"PID / parent: {os.getpid()}" in response.json()["stdout"]
+
+
+def test_terminal_command_maximum_length_is_enforced_by_api():
+    response = client.post("/api/terminal", json={"command": "?" * 257})
+    assert response.status_code == 422

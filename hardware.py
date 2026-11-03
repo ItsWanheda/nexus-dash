@@ -13,6 +13,14 @@ from typing import Any
 
 import psutil
 
+from hardware_providers import (
+    collect_system_inventory,
+    collect_gpu_inventory,
+    collect_amd_smi_devices,
+    collect_lhm_sensors,
+    collect_linux_hwmon,
+)
+
 _NVML_LOCK = threading.Lock()
 _NVML_READY = False
 
@@ -93,7 +101,7 @@ def _sensor_data() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dic
     if platform.system() == "Windows" and not board_temperatures:
         try:
             import wmi
-            connection = wmi.WMI(namespace=r"root\\wmi")
+            connection = wmi.WMI(namespace=r"root\wmi")
             for zone in connection.MSAcpi_ThermalZoneTemperature():
                 raw = _finite(getattr(zone, "CurrentTemperature", None))
                 if raw is None or raw <= 0:

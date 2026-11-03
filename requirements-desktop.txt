@@ -1,4 +1,5 @@
 -r requirements.txt
+-r requirements-hardware.txt
 pywebview>=5.4
 pystray>=0.19.5
 Pillow>=10.0
