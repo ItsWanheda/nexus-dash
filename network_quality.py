@@ -36,3 +36,33 @@ def sample_targets(targets: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "reason": result.get("message"),
         })
     return output
+
+
+
+def assess_quality_sample(sample: dict[str, Any]) -> dict[str, Any]:
+    """Classify persistent DNS/TCP quality signals using explicit, explainable thresholds."""
+    reasons: list[str] = []
+    if str(sample.get("status") or "").casefold() != "connected":
+        reasons.append("dns_or_tcp_failure")
+    for key, threshold, label in (
+        ("dns_latency_ms", 250.0, "high_dns_latency"),
+        ("tcp_latency_ms", 250.0, "high_tcp_connect_latency"),
+        ("jitter_ms", 50.0, "high_latency_swing"),
+        ("packet_loss_percent", 20.0, "high_tcp_attempt_failure_rate"),
+    ):
+        try:
+            value = float(sample.get(key))
+        except (TypeError, ValueError):
+            continue
+        if value >= threshold:
+            reasons.append(label)
+    return {
+        "unhealthy": bool(reasons),
+        "reasons": reasons,
+        "thresholds": {
+            "dns_latency_ms": 250.0,
+            "tcp_latency_ms": 250.0,
+            "latency_swing_ms": 50.0,
+            "tcp_attempt_failure_percent": 20.0,
+        },
+    }

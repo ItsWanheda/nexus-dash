@@ -35,7 +35,7 @@ from settings_store import SettingsStore
 from network_metrics import NetworkSampler, collect_connections, diagnose_tcp_connectivity, build_network_history_points
 from analytics import build_analytics_report
 from process_network import collect_process_network
-from network_quality import sample_targets
+from network_quality import sample_targets, assess_quality_sample
 from anomaly_detection import detect_anomalies
 from local_agent import LocalAgent, DEFAULT_MODEL as DEFAULT_ASSISTANT_MODEL
 
@@ -348,17 +348,13 @@ def _run_network_quality_checks(settings: dict[str, Any]) -> None:
             sample["jitter_ms"] = round(abs(float(sample["tcp_latency_ms"]) -
                                                 float(prior["tcp_latency_ms"])), 2)
         TELEMETRY_STORE.record_network_quality(sample)
+        assessment = assess_quality_sample(sample)
         tcp_latency = sample.get("tcp_latency_ms")
         dns_latency = sample.get("dns_latency_ms")
         jitter = sample.get("jitter_ms")
         loss = sample.get("packet_loss_percent")
-        is_failure = sample.get("status") != "connected"
-        is_unstable = (
-            (tcp_latency is not None and float(tcp_latency) >= 250.0)
-            or (dns_latency is not None and float(dns_latency) >= 250.0)
-            or (jitter is not None and float(jitter) >= 50.0)
-            or (loss is not None and float(loss) >= 20.0)
-        )
+        is_failure = str(sample.get("status") or "").casefold() != "connected"
+        is_unstable = assessment["unhealthy"] and not is_failure
         consecutive = _NETWORK_QUALITY_FAILURES.get(key, 0)
         if is_failure or is_unstable:
             consecutive += 1

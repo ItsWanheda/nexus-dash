@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import platform
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,7 @@ def collect_system_inventory() -> dict[str, Any]:
 
 
 
+@lru_cache(maxsize=512)
 def _pci_device_name(vendor_id: str, device_id: str) -> str | None:
     """Resolve marketing/device labels from locally installed pci.ids databases."""
     vendor = str(vendor_id or "").lower().removeprefix("0x").zfill(4)

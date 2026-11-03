@@ -136,7 +136,7 @@
         return;
       }
       const rows=Array.from(latest.values()).sort((a,b)=>Number(b.sampled_epoch)-Number(a.sampled_epoch));
-      target.innerHTML='<table class="network-table"><thead><tr><th>Target</th><th>Status</th><th>DNS</th><th>TCP</th><th>Jitter</th><th>Loss</th><th>Last check</th></tr></thead><tbody>'+
+      target.innerHTML='<table class="network-table"><thead><tr><th>Target</th><th>Status</th><th>DNS</th><th>TCP</th><th>Latency swing</th><th>TCP failures</th><th>Last check</th></tr></thead><tbody>'+
         rows.map(item=>'<tr><td>'+esc(item.host_label)+':'+count(item.port)+'</td><td>'+esc(item.status)+'</td><td>'+n(item.dns_latency_ms)+' ms</td><td>'+n(item.tcp_latency_ms)+' ms</td><td>'+n(item.jitter_ms)+' ms</td><td>'+n(item.packet_loss_percent)+'%</td><td>'+esc(new Date(Number(item.sampled_epoch)*1000).toLocaleString())+'</td></tr>').join('')+
         '</tbody></table>';
     }catch(error){
