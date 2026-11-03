@@ -42,6 +42,7 @@ function saveRecorderSettings() {
   };
   if (Object.values(next).some(value => !Number.isFinite(value))) return;
   state.alertConfig = next;
+  if (window.NexusEnhancements) window.NexusEnhancements.updateLegacyRules(next);
   try { localStorage.setItem(RECORDER_ALERT_STORAGE_KEY, JSON.stringify(next)); } catch (_) {}
   state.alertCounters = {};
   addLog('INFO', 'Flight Recorder alert thresholds updated.');

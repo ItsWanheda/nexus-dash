@@ -33,7 +33,7 @@
   function init() {
     const saved = readJSON(ALERT_KEY, {});
     alertState = {
-      rules: Object.assign({}, ALERT_DEFAULTS, saved.rules || {}),
+      rules: Object.assign({}, ALERT_DEFAULTS, { cpu: state.alertConfig.cpu, ram: state.alertConfig.ram, disk: state.alertConfig.disk, consecutive: state.alertConfig.consecutive }, saved.rules || {}),
       counters: saved.counters || {},
       lastFired: saved.lastFired || {},
       alerts: Array.isArray(saved.alerts) ? saved.alerts.slice(0, 100) : [],
@@ -179,7 +179,9 @@
       window.alert('Consecutive samples must be 1–10 and cooldown must be 30–3600 seconds.'); return;
     }
     rules.consecutive = consecutive; rules.cooldown_seconds = cooldown;
-    alertState.rules = rules; alertState.counters = {}; persistAlerts(); addLog('INFO', 'Advanced alert rules saved.');
+    alertState.rules = rules;
+    state.alertConfig = { cpu: rules.cpu, ram: rules.ram, disk: rules.disk, consecutive: rules.consecutive };
+    alertState.counters = {}; persistAlerts(); addLog('INFO', 'Advanced alert rules saved.');
   }
   function alertAction(action, target) {
     const id = target.getAttribute('data-alert-id'), item = alertState.alerts.find(entry => entry.id === id);
@@ -206,7 +208,7 @@
     Array.from(content.children).forEach((node, index) => { node.dataset.widgetId = ['cpu-chart', 'disk-card', 'activity-card', 'connection-card'][index]; node.dataset.widgetGroup = 'content'; });
   }
   function toolbarMarkup() {
-    return '<div class="dashboard-toolbar"><label>Layout<select id="dashboard-profile" class="flight-select"><option value="general">General</option><option value="gaming">Gaming</option><option value="developer">Developer</option><option value="workstation">Workstation</option><option value="laptop">Laptop</option></select></label><label>Chart window<select id="dashboard-range" class="flight-select"><option value="5m">5 minutes</option><option value="15m">15 minutes</option><option value="1h" selected>1 hour</option><option value="6h">6 hours</option><option value="24h">24 hours</option></select></label><label>Chart style<select id="dashboard-chart-style" class="flight-select"><option value="bars">Bars</option><option value="line">Line</option></select></label><button class="secondary-button" data-action="dashboard-edit" type="button">Customize</button></div><div id="dashboard-editor" class="dashboard-editor" hidden></div>';
+    return '<div class="dashboard-toolbar"><label>Layout<select id="dashboard-profile" class="flight-select"><option value="general">General</option><option value="gaming">Gaming</option><option value="developer">Developer</option><option value="workstation">Workstation</option><option value="laptop">Laptop</option></select></label><label>Chart window<select id="dashboard-range" class="flight-select"><option value="5m">5 minutes</option><option value="15m">15 minutes</option><option value="1h" selected>1 hour</option><option value="6h">6 hours</option><option value="24h">24 hours</option></select></label><label>Chart style<select id="dashboard-chart-style" class="flight-select"><option value="bars">Bars</option><option value="line">Line</option></select></label><label>Chart refresh<select id="dashboard-refresh" class="flight-select"><option value="5">5 seconds</option><option value="10">10 seconds</option><option value="30">30 seconds</option></select></label><button class="secondary-button" data-action="dashboard-edit" type="button">Customize</button></div><div id="dashboard-editor" class="dashboard-editor" hidden></div>';
   }
   function applyDashboard() {
     if (state.tab !== 'dashboard') return;
@@ -238,6 +240,8 @@
     });
     const profile = document.getElementById('dashboard-profile');
     if (profile) profile.value = workspace.profile;
+    const refresh = document.getElementById('dashboard-refresh');
+    if (refresh) refresh.value = String([5, 10, 30].includes(Number(workspace.refreshIntervalSeconds)) ? workspace.refreshIntervalSeconds : 10);
     const editor = document.getElementById('dashboard-editor');
     if (editor && !editor.dataset.ready) {
       editor.innerHTML = '<div class="dashboard-editor-head"><strong>Visible widgets and sizing</strong><span class="muted">Drag cards to reorder them.</span></div>' +
@@ -358,9 +362,12 @@
       const parent = p.parent ? escapeHTML(p.parent.name) + ' (PID ' + Number(p.parent.pid) + ')' : 'Unavailable';
       const children = (p.children || []).map(child => escapeHTML(child.name) + ' (' + Number(child.pid) + ')').join(', ') || 'None visible';
       const handles = p.handles.status === 'Available' ? (p.handles.count !== null ? p.handles.count + ' handles' : '') + (p.handles.file_descriptors !== null ? ' · ' + p.handles.file_descriptors + ' file descriptors' : '') : 'Unsupported by this OS/provider';
+      const initialRam = history.length ? Number(history[0].rss_mb) : Number(p.rss_mb);
+      const ramGrowth = Number(p.rss_mb) - initialRam;
       body.innerHTML = '<div class="process-detail-grid">' +
         processFact('CPU now', fmt(p.cpu_percent) + '%') + processFact('CPU average', averageCpu === null ? 'Warming up' : fmt(averageCpu) + '%') +
         processFact('RAM now', fmt(p.rss_mb) + ' MB') + processFact('RAM observed peak', fmt(peak) + ' MB') +
+        processFact('Initial RAM', fmt(initialRam) + ' MB') + processFact('Observed RAM growth', (ramGrowth >= 0 ? '+' : '') + fmt(ramGrowth) + ' MB') +
         processFact('Threads', p.threads) + processFact('Uptime', formatDuration(p.uptime_seconds)) +
         processFact('Parent process', parent) + processFact('Children', children) +
         processFact('Disk read rate', p.io.read_rate_bytes_per_sec === null ? 'Unavailable' : formatBytesPerSecond(p.io.read_rate_bytes_per_sec)) +
@@ -378,8 +385,10 @@
   }
   function processHistoryMarkup(history) {
     if (!history.length) return '<p class="empty-state">No process samples yet. Enable process history and revisit shortly.</p>';
-    const max = Math.max(1, ...history.map(item => Number(item.rss_mb) || 0));
-    return '<div class="process-memory-bars">' + history.slice(-60).map(item => '<i title="' + escapeHTML(new Date(item.timestamp).toLocaleTimeString() + ' · ' + fmt(item.rss_mb) + ' MB') + '" style="height:' + Math.max(2, Number(item.rss_mb) / max * 100) + '%"></i>').join('') + '</div><div class="chart-axis"><span>Older</span><span>Latest</span></div>';
+    const points = history.slice(-60), max = Math.max(1, ...points.map(item => Number(item.rss_mb) || 0));
+    const memory = points.map(item => '<i title="' + escapeHTML(new Date(item.timestamp).toLocaleTimeString() + ' · ' + fmt(item.rss_mb) + ' MB RAM') + '" style="height:' + Math.max(2, Number(item.rss_mb) / max * 100) + '%"></i>').join('');
+    const cpu = points.map(item => '<i title="' + escapeHTML(new Date(item.timestamp).toLocaleTimeString() + ' · ' + fmt(item.cpu_percent) + '% CPU') + '" style="height:' + Math.max(2, Math.min(100, Number(item.cpu_percent) || 0)) + '%"></i>').join('');
+    return '<div class="process-trend-series"><span>RAM history</span><div class="process-memory-bars">' + memory + '</div></div><div class="process-trend-series"><span>CPU history</span><div class="process-cpu-bars">' + cpu + '</div></div><div class="chart-axis"><span>Older</span><span>Latest</span></div>';
   }
   async function compareProcesses() {
     const first = state.selectedProcess, select = document.getElementById('process-compare-target');
@@ -394,15 +403,45 @@
     } catch (error) { target.innerHTML = '<p class="error-text">' + escapeHTML(error.message) + '</p>'; }
   }
 
+  let dashboardRefreshTimer = null;
+  function scheduleDashboardRefresh() {
+    if (dashboardRefreshTimer) window.clearInterval(dashboardRefreshTimer);
+    const seconds = [5, 10, 30].includes(Number(workspace.refreshIntervalSeconds)) ? Number(workspace.refreshIntervalSeconds) : 10;
+    dashboardRefreshTimer = window.setInterval(loadDashboardHistory, seconds * 1000);
+  }
   function afterRender() {
-    if (state.tab === 'dashboard') { applyDashboard(); loadDashboardHistory(); }
+    if (state.tab === 'dashboard') {
+      applyDashboard(); loadDashboardHistory(); scheduleDashboardRefresh();
+    } else if (dashboardRefreshTimer) {
+      window.clearInterval(dashboardRefreshTimer); dashboardRefreshTimer = null;
+    }
+  }
+  function updateLegacyRules(config) {
+    if (!config) return;
+    ['cpu', 'ram', 'disk', 'consecutive'].forEach(key => {
+      const value = Number(config[key]);
+      if (Number.isFinite(value) && value > 0) alertState.rules[key] = value;
+    });
+    persistAlerts();
   }
   function handleChange(target) {
     if (!target) return;
     if (target.id === 'timeline-window') loadTimeline();
-    else if (target.id === 'dashboard-profile') { workspace.profile = target.value; persistWorkspace(); applyDashboard(); }
+    else if (target.id === 'dashboard-profile') {
+      workspace.profile = target.value; persistWorkspace();
+      const editor = document.getElementById('dashboard-editor'); if (editor) editor.dataset.ready = '';
+      applyDashboard();
+    }
     else if (target.id === 'dashboard-range') loadDashboardHistory();
     else if (target.id === 'dashboard-chart-style') renderDashboardChart();
+    else if (target.id === 'dashboard-refresh') {
+      workspace.refreshIntervalSeconds = [5, 10, 30].includes(Number(target.value)) ? Number(target.value) : 10;
+      persistWorkspace(); scheduleDashboardRefresh();
+    }
+    else if (target.id === 'dashboard-refresh') {
+      workspace.refreshIntervalSeconds = [5, 10, 30].includes(Number(target.value)) ? Number(target.value) : 10;
+      persistWorkspace(); scheduleDashboardRefresh();
+    }
     else if (target.dataset.widgetVisible) {
       const layout = currentLayout(), id = target.dataset.widgetVisible;
       layout.hidden = target.checked ? layout.hidden.filter(x => x !== id) : Array.from(new Set(layout.hidden.concat(id)));
@@ -430,5 +469,5 @@
     if (action === 'dashboard-edit') { const editor = document.getElementById('dashboard-editor'); if (editor) editor.hidden = !editor.hidden; return true; }
     return false;
   }
-  global.NexusEnhancements = { init, renderTab, afterRender, handleAction, handleChange, evaluateAlerts, renderAlertRows, loadTimeline, renderDashboardChart };
+  global.NexusEnhancements = { init, renderTab, afterRender, handleAction, handleChange, evaluateAlerts, renderAlertRows, loadTimeline, renderDashboardChart, updateLegacyRules };
 })(window);

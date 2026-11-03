@@ -403,10 +403,19 @@ def create_timeline_marker(payload: TimelineMarkerRequest) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="Timeline marker could not be saved.")
 
 
+def _inspect_process(pid: int, create_time: float) -> dict[str, Any]:
+    result = PROCESS_INTELLIGENCE.inspect(pid, create_time)
+    if SETTINGS_STORE.get()["privacy_mode"]:
+        result["owner"] = None
+        result["executable"]["path"] = None
+        result["executable"]["status"] = "Redacted by privacy mode"
+    return result
+
+
 @app.get("/api/processes/{pid}")
 def get_process_detail(pid: int, create_time: float = Query(gt=0)) -> dict[str, Any]:
     try:
-        return PROCESS_INTELLIGENCE.inspect(pid, create_time)
+        return _inspect_process(pid, create_time)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:
@@ -442,8 +451,8 @@ def compare_processes(
 ) -> dict[str, Any]:
     try:
         return {"processes": [
-            PROCESS_INTELLIGENCE.inspect(pid_a, create_time_a),
-            PROCESS_INTELLIGENCE.inspect(pid_b, create_time_b),
+            _inspect_process(pid_a, create_time_a),
+            _inspect_process(pid_b, create_time_b),
         ]}
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

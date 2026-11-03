@@ -180,7 +180,8 @@ function handleClick(event) {
   else if (action === 'clear-logs') {
     state.logs = [];
     renderLogs();
-  } else if (action === 'terminate-process') terminateProcess(Number(target.getAttribute('data-pid')));
+  } else if (action === 'terminate-process') terminateProcess(Number(target.getAttribute('data-pid')), Number(target.getAttribute('data-create-time')));
+  else if (window.NexusEnhancements && window.NexusEnhancements.handleAction(action, target)) return;
 }
 function closeMenu() {
   const sidebar = document.getElementById('sidebar');
@@ -390,8 +391,8 @@ async function fetchStats() {
     }
     state.previousNetwork = { at: now, sent: data.network.sent_bytes, received: data.network.recv_bytes };
     state.stats = data;
-    evaluateRecorderAlerts(data);
     if (window.NexusEnhancements) window.NexusEnhancements.evaluateAlerts(data);
+    else evaluateRecorderAlerts(data);
     state.history.push({ at: now, cpu: data.cpu.percent, ram: data.ram.percent });
     state.history = state.history.slice(-30);
     setConnection(true);
