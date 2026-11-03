@@ -318,3 +318,60 @@ def test_windows_gpu_inventory_row_keeps_dxgi_identity_and_memory():
     assert row["dedicated_video_memory_gb"] == 16.0
     assert row["shared_system_memory_gb"] == 8.0
     assert row["shared_memory_used_gb"]["status"] == "Unavailable"
+
+
+def test_amd_adlx_provider_reads_identity_and_supported_metrics(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from nexus_dash.services import hardware_providers
+
+    class FakeGpu:
+        def Name(self): return "AMD Radeon RX 7800 XT"
+        def VendorId(self): return 0x1002
+        def DeviceId(self): return 0x747e
+
+    class FakeMetrics:
+        def GPUUsage(self): return 64
+        def GPUTemperature(self): return 61
+        def GPUHotspotTemperature(self): return 78
+        def GPUPower(self): return 210
+        def GPUClockSpeed(self): return 2450
+        def GPUVRAMClockSpeed(self): return 2400
+        def GPUFanSpeed(self): return 42
+        def GPUVRAM(self): return 4096
+        def GPUSharedMemory(self): return 128
+
+    class FakeHelper:
+        terminated = False
+        def Initialize(self): return 0
+        def GetSystemServices(self):
+            return SimpleNamespace(
+                GetPerformanceMonitoringServices=lambda: SimpleNamespace(
+                    GetCurrentGPUMetrics=lambda gpu: FakeMetrics()
+                ),
+                GetGPUs=lambda: [FakeGpu()],
+            )
+        def Terminate(self): self.terminated = True
+
+    helper = FakeHelper()
+    fake_adlx = SimpleNamespace(
+        ADLX=SimpleNamespace(
+            ADLXHelper=lambda: helper,
+            ADLX_RESULT=SimpleNamespace(ADLX_OK=0),
+        )
+    )
+    monkeypatch.setattr(hardware_providers.platform, "system", lambda: "Windows")
+    monkeypatch.setitem(sys.modules, "adlx", fake_adlx)
+
+    devices = hardware_providers.collect_amd_adlx_devices()
+
+    assert len(devices) == 1
+    assert devices[0]["vendor"] == "AMD"
+    assert devices[0]["vendor_id"] == "1002"
+    assert devices[0]["device_id"] == "747e"
+    assert devices[0]["utilization_percent"] == 64
+    assert devices[0]["temperature_c"] == 61
+    assert devices[0]["hotspot_temperature_c"] == 78
+    assert devices[0]["memory_used_gb"] == 4
+    assert devices[0]["shared_memory_used_gb"] == 0.125
+    assert helper.terminated is True

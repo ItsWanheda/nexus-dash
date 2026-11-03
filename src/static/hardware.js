@@ -99,6 +99,7 @@ async function loadHardware() {
             hardwareReadingRow('Shared GPU memory capacity', device.shared_system_memory_gb === null || device.shared_system_memory_gb === undefined ? null : { value: device.shared_system_memory_gb, unit: 'GiB', status: 'Available' }) +
             hardwareReadingRow('Shared GPU memory in use', device.shared_memory_used_gb) +
             hardwareReadingRow('Temperature', device.temperature_c) +
+            hardwareReadingRow('Hotspot temperature', device.hotspot_temperature_c) +
             hardwareReadingRow('Power draw', device.power_w) +
             hardwareReadingRow('Graphics clock', device.graphics_clock_mhz, 0) +
             hardwareReadingRow('Memory clock', device.memory_clock_mhz, 0) +

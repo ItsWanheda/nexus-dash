@@ -18,7 +18,7 @@ NEXUS discovers display adapters independently of their live sensor providers. I
 | Platform | Inventory source | Additional live telemetry |
 | --- | --- | --- |
 | Windows | DirectX DXGI adapter enumeration (model, PCI IDs, subsystem, revision, LUID and dedicated/shared memory) merged with WMI driver/display metadata; PCI device-registry fallback | Windows GPU Engine/AdapterMemory counters keyed by DXGI LUID; NVIDIA NVML where supported; LibreHardwareMonitor WMI readings for supported AMD, NVIDIA and Intel devices |
-| Linux | All PCI display-class devices from `/sys/bus/pci/devices`; vendor/device names from local `pci.ids` when installed | Generic DRM/sysfs counters (driver-dependent); AMD SMI on supported AMDGPU/ROCm systems; NVIDIA NVML |
+| Linux | All PCI display-class devices from `/sys/bus/pci/devices`; vendor/device names from local `pci.ids` when installed | Generic DRM/sysfs counters (driver-dependent); AMD SMI on supported AMDGPU/ROCm systems; AMD ADLX on supported Windows AMD drivers; NVIDIA NVML |
 | macOS | Built-in `system_profiler SPDisplaysDataType -json` inventory | Values exposed by the operating system or a compatible installed provider |
 
 Known PCI vendor identifiers are labelled as AMD, NVIDIA, Intel, Apple, or their respective platform/vendor names. Other valid PCI identifiers are resolved from the local `pci.ids` database when possible; otherwise NEXUS preserves a generic PCI vendor label and still shows the device entry.
@@ -26,14 +26,14 @@ Known PCI vendor identifiers are labelled as AMD, NVIDIA, Intel, Apple, or their
 GPU **identification** and **live measurements** are separate:
 - An identified device remains visible as **Inventory only** when a driver/provider does not expose live readings.
 - When available, Linux DRM/sysfs counters can expose GPU busy percentage, VRAM use/capacity, temperature, power, clock and fan readings.
-- AMD SMI provides additional readings on supported Linux AMDGPU/ROCm systems. AMD SMI is not required for AMD device identification.
+- AMD SMI provides additional readings on supported Linux AMDGPU/ROCm systems. AMD ADLX (optional `amd-adlx` Python binding) provides AMD GPU name/device IDs and supported live metrics on compatible 64-bit Windows systems, including usage, core/VRAM clocks, temperature/hotspot, power, fan and VRAM usage. Both are optional and neither is required for basic AMD device identification.
 - NVIDIA NVML provides additional NVIDIA measurements when its driver and Python binding are available.
 - On Windows, DXGI supplies the adapter model, PCI vendor/device/subsystem IDs, revision, dedicated/shared memory capacities and adapter LUID. WMI adds driver version/date, video processor and active display mode.
 - On supported Windows 10/11 graphics drivers, GPU Engine and GPU AdapterMemory performance counters can expose per-adapter utilisation and dedicated/shared memory use. NEXUS matches these counters by DXGI LUID, not vendor name.
 - LibreHardwareMonitor can provide additional per-device load, temperature, power, clock, fan and memory readings across multiple GPU vendors. Matchable sensor names are attached to the corresponding adapter rather than being reported as a separate GPU.
 - Multiple adapters from the same vendor are retained. Live readings are merged by PCI address/device identity or an unambiguous model match, never by vendor name alone.
 
-Install optional Python bindings:
+Install optional Python bindings (the Windows AMD ADLX binding is included in the Windows hardware extras and packaged desktop build):
 
 ```bash
 python -m pip install -r requirements-hardware.txt
