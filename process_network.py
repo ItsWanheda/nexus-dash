@@ -64,3 +64,22 @@ def collect_process_network() -> dict[str, Any]:
     items = parse_nethogs_trace(result.stdout)
     return {"status": "available" if items else "warming-up", "provider": "NetHogs",
             "items": items, "reason": None if items else "NetHogs returned no parseable process-rate rows in this sample."}
+
+
+
+def get_process_network_provider_status() -> dict[str, Any]:
+    """Return capability without launching a second accounting session."""
+    if platform.system() != "Linux":
+        return {
+            "status": "unsupported", "provider": None, "items": [],
+            "reason": "Per-process byte rates are not available on this OS build. Windows ETW/WFP and macOS per-process byte providers are not implemented; socket ownership is not bandwidth.",
+        }
+    if not shutil.which("nethogs"):
+        return {
+            "status": "not-installed", "provider": "NetHogs", "items": [],
+            "reason": "Install NetHogs to enable Linux per-process bandwidth accounting.",
+        }
+    return {
+        "status": "provider-ready", "provider": "NetHogs", "items": [],
+        "reason": "NetHogs is installed. The background recorder samples it every 15 seconds while the opt-in setting and background recording are enabled.",
+    }

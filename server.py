@@ -34,7 +34,7 @@ from process_intelligence import ProcessIntelligence
 from settings_store import SettingsStore
 from network_metrics import NetworkSampler, collect_connections, diagnose_tcp_connectivity, build_network_history_points
 from analytics import build_analytics_report
-from process_network import collect_process_network
+from process_network import collect_process_network, get_process_network_provider_status
 from network_quality import sample_targets, assess_quality_sample
 from anomaly_detection import detect_anomalies
 from local_agent import LocalAgent, DEFAULT_MODEL as DEFAULT_ASSISTANT_MODEL
@@ -61,6 +61,7 @@ _NETWORK_QUALITY_ALERT_LAST: dict[str, float] = {}
 _NETWORK_QUALITY_LAST: float = 0.0
 _ANOMALY_LAST_FIRED: dict[str, float] = {}
 _PROCESS_NETWORK_LAST: float = 0.0
+_PROCESS_NETWORK_STATUS: dict[str, Any] = {}
 _TIMELINE_THRESHOLDS: dict[str, bool] = {}
 _RECORDER_STOP = threading.Event()
 _RECORDER_THREAD: threading.Thread | None = None
@@ -380,11 +381,20 @@ def _run_network_quality_checks(settings: dict[str, Any]) -> None:
 
 
 def _run_process_network_sampling(settings: dict[str, Any]) -> None:
-    global _PROCESS_NETWORK_LAST
-    if not settings.get("process_network_enabled") or time.time() - _PROCESS_NETWORK_LAST < 15:
+    global _PROCESS_NETWORK_LAST, _PROCESS_NETWORK_STATUS
+    if not settings.get("process_network_enabled"):
+        _PROCESS_NETWORK_STATUS = {"status": "disabled", "provider": None, "reason": "Enable process network attribution in Settings."}
+        return
+    if time.time() - _PROCESS_NETWORK_LAST < 15:
         return
     _PROCESS_NETWORK_LAST = time.time()
     result = collect_process_network()
+    _PROCESS_NETWORK_STATUS = {
+        "status": result.get("status", "unknown"),
+        "provider": result.get("provider"),
+        "reason": result.get("reason"),
+        "sampled_at": datetime.now(timezone.utc).isoformat(),
+    }
     if result.get("items"):
         TELEMETRY_STORE.record_process_network(result["items"])
 
@@ -568,14 +578,14 @@ def get_process_network(window: str = Query(default="24h"), limit: int = Query(d
         raise HTTPException(status_code=400, detail="Unsupported process-network window.")
     settings = SETTINGS_STORE.get()
     if not settings.get("process_network_enabled"):
-        return {"status": "disabled", "provider": None, "items": [],
+        return {"status": "disabled", "provider": None, "items": [], "history": [],
                 "reason": "Enable process network attribution in Settings. A compatible OS provider is required."}
     try:
-        live = collect_process_network()
-        if live.get("items"):
-            TELEMETRY_STORE.record_process_network(live["items"])
+        # The background recorder is the sole owner of the NetHogs capture process.
+        # The UI route only reads persisted samples to avoid duplicate concurrent sessions.
+        status = dict(_PROCESS_NETWORK_STATUS or get_process_network_provider_status())
         history = TELEMETRY_STORE.get_process_network_history(window, limit)
-        return {**live, "history": history, "history_count": len(history)}
+        return {**status, "items": history, "history": history, "history_count": len(history)}
     except (OSError, RuntimeError, sqlite3.Error):
         LOGGER.exception("Process network accounting failed")
         raise HTTPException(status_code=503, detail="Process network data is temporarily unavailable.")
