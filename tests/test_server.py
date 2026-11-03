@@ -143,3 +143,52 @@ def test_storage_endpoint_returns_bounded_drive_and_io_data():
 def test_storage_endpoint_rejects_untrusted_origin():
     response = client.get("/api/storage", headers={"Origin": "https://untrusted.example"})
     assert response.status_code == 403
+
+
+
+def test_process_detail_and_history_are_bound_to_process_creation_time():
+    import os
+    import time
+    process = __import__("psutil").Process(os.getpid())
+    created = process.create_time()
+    detail = client.get(f"/api/processes/{os.getpid()}?create_time={created}")
+    assert detail.status_code == 200
+    payload = detail.json()
+    assert {"create_time", "threads", "uptime_seconds", "io", "handles", "executable", "history"} <= payload.keys()
+    stale = client.get(f"/api/processes/{os.getpid()}?create_time={created - 100}")
+    assert stale.status_code == 404
+
+
+def test_process_history_rejects_unsupported_windows():
+    import os
+    import psutil
+    created = psutil.Process(os.getpid()).create_time()
+    assert client.get(f"/api/process-history?pid={os.getpid()}&create_time={created}&window=forever").status_code == 400
+
+
+def test_settings_are_validated_and_persisted():
+    response = client.get("/api/settings")
+    assert response.status_code == 200
+    assert response.json()["retention_days"] in {1, 7, 30}
+    updated = client.put("/api/settings", json={"sampling_interval_seconds": 10, "retention_days": 7})
+    assert updated.status_code == 200
+    assert updated.json()["sampling_interval_seconds"] == 10
+    invalid = client.put("/api/settings", json={"sampling_interval_seconds": 2})
+    assert invalid.status_code == 400
+
+
+def test_timeline_records_resource_events_and_user_markers():
+    marker = client.post("/api/timeline/markers", json={"title": "Started game", "note": "Testing frame pacing"})
+    assert marker.status_code == 200
+    result = client.get("/api/timeline?window=24h&limit=20")
+    assert result.status_code == 200
+    assert any(item["title"] == "Started game" for item in result.json()["events"])
+    assert client.get("/api/timeline?window=forever").status_code == 400
+
+
+def test_process_termination_requires_process_identity():
+    import os
+    import psutil
+    created = psutil.Process(os.getpid()).create_time()
+    response = client.post("/api/process/kill", json={"pid": os.getpid(), "create_time": created + 50})
+    assert response.status_code in {403, 409}

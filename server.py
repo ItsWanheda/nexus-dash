@@ -26,6 +26,8 @@ from telemetry_store import SAMPLE_FIELDS, WINDOW_SECONDS, TelemetryStore
 from diagnostics import DIAGNOSTICS_VERSION, ProcessMemoryTracker, analyse_diagnostics, collect_os_events
 from hardware import collect_hardware
 from storage_metrics import StorageSampler
+from process_intelligence import ProcessIntelligence
+from settings_store import SettingsStore
 
 LOGGER = logging.getLogger("nexus")
 ALLOWED_ORIGINS = {
@@ -39,6 +41,9 @@ _NVML_INITIALIZED = False
 TELEMETRY_STORE = TelemetryStore()
 PROCESS_MEMORY_TRACKER = ProcessMemoryTracker()
 STORAGE_SAMPLER = StorageSampler()
+SETTINGS_STORE = SettingsStore(TELEMETRY_STORE.directory)
+PROCESS_INTELLIGENCE = ProcessIntelligence()
+_TIMELINE_THRESHOLDS: dict[str, bool] = {}
 _RECORDER_STOP = threading.Event()
 _RECORDER_THREAD: threading.Thread | None = None
 
@@ -71,6 +76,23 @@ class TerminalRequest(BaseModel):
 
 class ProcessKillRequest(BaseModel):
     pid: int = Field(gt=0)
+    create_time: float = Field(gt=0)
+
+
+class TimelineMarkerRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    note: str = Field(default="", max_length=500)
+
+
+class SettingsUpdate(BaseModel):
+    sampling_interval_seconds: int | None = None
+    retention_days: int | None = None
+    background_recording: bool | None = None
+    process_history_enabled: bool | None = None
+    process_history_interval_seconds: int | None = None
+    process_exclusions: list[str] | None = None
+    privacy_mode: bool | None = None
+    start_minimized: bool | None = None
 
 
 def _format_uptime(seconds: float) -> str:
@@ -158,10 +180,33 @@ def _collect_stats() -> dict[str, Any]:
 
 
 @app.get("/api/stats")
+def _record_resource_events(payload: dict[str, Any]) -> None:
+    metrics = [
+        ("cpu", "CPU utilisation spike", float(payload.get("cpu", {}).get("percent") or 0), 90.0, 85.0),
+        ("ram", "System memory pressure", float(payload.get("ram", {}).get("percent") or 0), 90.0, 85.0),
+        ("disk", "System volume nearly full", float(payload.get("disk", {}).get("percent") or 0), 95.0, 90.0),
+        ("disk-io", "Sustained disk activity", float(payload.get("storage_io", {}).get("activity_percent") or 0), 95.0, 85.0),
+    ]
+    for key, title, value, threshold, reset_at in metrics:
+        active = _TIMELINE_THRESHOLDS.get(key, False)
+        if value >= threshold and not active:
+            TELEMETRY_STORE.record_event(
+                "resource", title, f"Observed {value:.1f}% (signal threshold {threshold:.0f}%).",
+                severity="critical" if value >= 98 else "warning",
+                metadata={"metric": key, "value": round(value, 1), "threshold": threshold},
+            )
+            _TIMELINE_THRESHOLDS[key] = True
+        elif active and value < reset_at:
+            _TIMELINE_THRESHOLDS[key] = False
+
+
+@app.get("/api/stats")
 def get_stats() -> dict[str, Any]:
     payload = _collect_stats()
     try:
-        TELEMETRY_STORE.record(payload)
+        if SETTINGS_STORE.get()["background_recording"]:
+            if TELEMETRY_STORE.record(payload):
+                _record_resource_events(payload)
     except Exception:
         # A history-storage issue must not make live telemetry unavailable.
         LOGGER.exception("Telemetry sample could not be recorded")
@@ -170,15 +215,36 @@ def get_stats() -> dict[str, Any]:
 
 def _recorder_loop() -> None:
     cycle = 0
+    elapsed = 0
     while not _RECORDER_STOP.is_set():
         try:
-            TELEMETRY_STORE.record(_collect_stats())
-            cycle += 1
-            if cycle % 3 == 0:
-                PROCESS_MEMORY_TRACKER.sample()
+            settings = SETTINGS_STORE.get()
+            interval = int(settings["sampling_interval_seconds"])
+            TELEMETRY_STORE.sample_interval_seconds = float(interval)
+            TELEMETRY_STORE.retention_seconds = int(settings["retention_days"]) * 86400
+            if settings["background_recording"]:
+                payload = _collect_stats()
+                if TELEMETRY_STORE.record(payload):
+                    _record_resource_events(payload)
+                cycle += interval
+                if settings["process_history_enabled"] and cycle >= int(settings["process_history_interval_seconds"]):
+                    process_events = PROCESS_INTELLIGENCE.sample(settings.get("process_exclusions", []))
+                    for item in process_events["started"]:
+                        TELEMETRY_STORE.record_event(
+                            "process-start", f"Process started: {item['name']}",
+                            f"PID {item['pid']}", metadata={"pid": item["pid"]},
+                        )
+                    for item in process_events["exited"]:
+                        TELEMETRY_STORE.record_event(
+                            "process-exit", f"Process exited: {item['name']}",
+                            f"PID {item['pid']}", metadata={"pid": item["pid"]},
+                        )
+                    PROCESS_MEMORY_TRACKER.sample()
+                    cycle = 0
+            _RECORDER_STOP.wait(interval)
         except Exception:
             LOGGER.exception("Background telemetry sample failed")
-        _RECORDER_STOP.wait(5.0)
+            _RECORDER_STOP.wait(5.0)
 
 
 @app.on_event("startup")
@@ -268,19 +334,113 @@ def get_storage() -> dict[str, Any]:
 @app.get("/api/processes")
 def get_processes(limit: int = Query(default=100, ge=1, le=200)) -> dict[str, Any]:
     items = []
-    for process in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info", "status"]):
+    for process in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info", "status", "create_time", "ppid", "num_threads"]):
         try:
             info = process.info
             memory = info.get("memory_info")
             items.append({"pid": info["pid"], "name": info.get("name") or "Unknown",
                           "cpu": round(float(info.get("cpu_percent") or 0), 1),
                           "ram_mb": round(memory.rss / (1024 ** 2), 1) if memory else 0,
-                          "status": info.get("status") or "unknown", "can_terminate": _can_terminate(process)})
+                          "status": info.get("status") or "unknown", "can_terminate": _can_terminate(process),
+                          "create_time": info.get("create_time"), "ppid": info.get("ppid"),
+                          "threads": info.get("num_threads")})
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
     items.sort(key=lambda item: (item["cpu"], item["ram_mb"]), reverse=True)
     return {"items": items[:limit], "count": min(len(items), limit),
             "sampled_at": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/settings")
+def get_settings() -> dict[str, Any]:
+    return SETTINGS_STORE.get()
+
+
+@app.put("/api/settings")
+def update_settings(payload: SettingsUpdate) -> dict[str, Any]:
+    try:
+        updated = SETTINGS_STORE.update(payload.dict(exclude_none=True))
+        TELEMETRY_STORE.sample_interval_seconds = float(updated["sampling_interval_seconds"])
+        TELEMETRY_STORE.retention_seconds = int(updated["retention_days"]) * 86400
+        return updated
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/timeline")
+def get_timeline(
+    window: str = Query(default="24h"),
+    limit: int = Query(default=500, ge=1, le=2000),
+) -> dict[str, Any]:
+    if window not in WINDOW_SECONDS:
+        raise HTTPException(status_code=400, detail="Unsupported timeline window.")
+    try:
+        events = TELEMETRY_STORE.get_events(window, limit)
+    except (OSError, RuntimeError, ValueError, sqlite3.Error):
+        LOGGER.exception("Unable to read investigation timeline")
+        raise HTTPException(status_code=503, detail="Timeline is temporarily unavailable.")
+    return {"window": window, "count": len(events), "events": events, "storage": "local-sqlite"}
+
+
+@app.post("/api/timeline/markers")
+def create_timeline_marker(payload: TimelineMarkerRequest) -> dict[str, Any]:
+    try:
+        event = TELEMETRY_STORE.record_event(
+            "marker", payload.title.strip(), payload.note.strip(),
+            severity="info", metadata={"source": "user"},
+        )
+        return {"status": "created", "event": event}
+    except (OSError, sqlite3.Error, ValueError):
+        LOGGER.exception("Unable to save timeline marker")
+        raise HTTPException(status_code=503, detail="Timeline marker could not be saved.")
+
+
+@app.get("/api/processes/{pid}")
+def get_process_detail(pid: int, create_time: float = Query(gt=0)) -> dict[str, Any]:
+    try:
+        return PROCESS_INTELLIGENCE.inspect(pid, create_time)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.get("/api/process-history")
+def get_process_history(
+    pid: int = Query(gt=0),
+    create_time: float = Query(gt=0),
+    window: str = Query(default="30m"),
+) -> dict[str, Any]:
+    windows = {"5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "6h": 21600, "24h": 86400}
+    if window not in windows:
+        raise HTTPException(status_code=400, detail="Unsupported process-history window.")
+    try:
+        process = psutil.Process(pid)
+        if abs(float(process.create_time()) - create_time) > 0.01:
+            raise HTTPException(status_code=404, detail="The process no longer exists or its PID was reused.")
+        history = PROCESS_INTELLIGENCE.history(pid, create_time, windows[window])
+        return {"pid": pid, "create_time": create_time, "window": window, "samples": history,
+                "count": len(history), "status": "Available" if history else "Warming up"}
+    except psutil.NoSuchProcess as exc:
+        raise HTTPException(status_code=404, detail="The process no longer exists.") from exc
+    except psutil.AccessDenied as exc:
+        raise HTTPException(status_code=403, detail="The operating system denied access to this process.") from exc
+
+
+@app.get("/api/process-compare")
+def compare_processes(
+    pid_a: int = Query(gt=0), create_time_a: float = Query(gt=0),
+    pid_b: int = Query(gt=0), create_time_b: float = Query(gt=0),
+) -> dict[str, Any]:
+    try:
+        return {"processes": [
+            PROCESS_INTELLIGENCE.inspect(pid_a, create_time_a),
+            PROCESS_INTELLIGENCE.inspect(pid_b, create_time_b),
+        ]}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @app.get("/api/history")
@@ -337,7 +497,7 @@ def get_process_tree(limit: int = Query(default=500, ge=1, le=1000)) -> dict[str
     """Return a bounded parent/child snapshot. No process path or command line is collected."""
     nodes: dict[int, dict[str, Any]] = {}
     truncated = False
-    fields = ["pid", "ppid", "name", "cpu_percent", "memory_info", "status"]
+    fields = ["pid", "ppid", "name", "cpu_percent", "memory_info", "status", "create_time", "num_threads"]
     for process in psutil.process_iter(fields):
         if len(nodes) >= limit:
             truncated = True
@@ -354,6 +514,8 @@ def get_process_tree(limit: int = Query(default=500, ge=1, le=1000)) -> dict[str
                 "ram_mb": round(memory.rss / (1024 ** 2), 1) if memory else 0.0,
                 "status": info.get("status") or "unknown",
                 "can_terminate": _can_terminate(process),
+                "create_time": info.get("create_time"),
+                "threads": info.get("num_threads"),
                 "children": [],
             }
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, TypeError, ValueError):
@@ -386,6 +548,9 @@ def kill_process(payload: ProcessKillRequest) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail="This process is protected.")
     try:
         process = psutil.Process(payload.pid)
+        actual_create_time = float(process.create_time())
+        if abs(actual_create_time - payload.create_time) > 0.01:
+            raise HTTPException(status_code=409, detail="The selected PID now belongs to a different process.")
         if not _same_user(process):
             raise HTTPException(status_code=403, detail="Only processes owned by the current user may be terminated.")
         process.terminate()

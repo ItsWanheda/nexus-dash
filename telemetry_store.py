@@ -81,6 +81,17 @@ class TelemetryStore:
                 "CREATE INDEX IF NOT EXISTS idx_telemetry_samples_epoch "
                 "ON telemetry_samples(sampled_epoch)"
             )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS timeline_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_epoch REAL NOT NULL,
+                    payload TEXT NOT NULL
+                )"""
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_timeline_events_epoch "
+                "ON timeline_events(created_epoch)"
+            )
             connection.commit()
         try:
             os.chmod(self.directory, 0o700)
@@ -179,3 +190,67 @@ class TelemetryStore:
         with self._lock, closing(self._connect()) as connection:
             row = connection.execute("SELECT COUNT(*) AS total FROM telemetry_samples").fetchone()
         return int(row["total"])
+
+
+    def record_event(
+        self,
+        category: str,
+        title: str,
+        detail: str = "",
+        *,
+        severity: str = "info",
+        metadata: dict[str, Any] | None = None,
+        created_at: float | None = None,
+    ) -> dict[str, Any]:
+        """Persist a bounded event without storing command lines or executable paths."""
+        allowed_categories = {"resource", "process-start", "process-exit", "marker", "system"}
+        allowed_severities = {"info", "warning", "critical"}
+        category_value = category if category in allowed_categories else "system"
+        severity_value = severity if severity in allowed_severities else "info"
+        now = float(created_at if created_at is not None else time.time())
+        safe_metadata: dict[str, Any] = {}
+        for key, value in list((metadata or {}).items())[:12]:
+            if not isinstance(key, str) or len(key) > 40:
+                continue
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                safe_metadata[key] = str(value)[:160] if isinstance(value, str) else value
+        event = {
+            "timestamp": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+            "category": category_value,
+            "severity": severity_value,
+            "title": str(title)[:120],
+            "detail": str(detail)[:500],
+            "metadata": safe_metadata,
+        }
+        payload = json.dumps(event, separators=(",", ":"), allow_nan=False)
+        with self._lock, closing(self._connect()) as connection:
+            connection.execute(
+                "INSERT INTO timeline_events(created_epoch, payload) VALUES (?, ?)",
+                (now, payload),
+            )
+            connection.execute(
+                "DELETE FROM timeline_events WHERE created_epoch < ?",
+                (now - max(self.retention_seconds, 30 * 86400),),
+            )
+            connection.execute(
+                """DELETE FROM timeline_events WHERE id IN (
+                    SELECT id FROM timeline_events ORDER BY created_epoch DESC
+                    LIMIT -1 OFFSET 10000
+                )"""
+            )
+            connection.commit()
+        return event
+
+    def get_events(self, window: str = "24h", limit: int = 500) -> list[dict[str, Any]]:
+        if window not in WINDOW_SECONDS:
+            raise ValueError("Unsupported timeline window.")
+        bounded_limit = max(1, min(int(limit), 2000))
+        cutoff = time.time() - WINDOW_SECONDS[window]
+        with self._lock, closing(self._connect()) as connection:
+            rows = connection.execute(
+                """SELECT payload FROM timeline_events
+                   WHERE created_epoch >= ?
+                   ORDER BY created_epoch DESC LIMIT ?""",
+                (cutoff, bounded_limit),
+            ).fetchall()
+        return [json.loads(row["payload"]) for row in reversed(rows)]

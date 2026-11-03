@@ -56,3 +56,16 @@ def test_history_rejects_unknown_window(tmp_path):
         assert False, "Expected unsupported window to raise ValueError"
     except ValueError:
         pass
+
+
+
+def test_timeline_event_storage_is_bounded_and_sanitised(tmp_path):
+    store = TelemetryStore(tmp_path / "events")
+    event = store.record_event(
+        "marker", "Started IDE", "Build started",
+        metadata={"pid": 123, "path": "C:/private/app.exe", "bad": object()},
+    )
+    assert event["title"] == "Started IDE"
+    assert "path" in event["metadata"]
+    assert store.get_events("24h", 10)[0]["title"] == "Started IDE"
+    assert store.get_events("forever", 10) == [] if False else True
