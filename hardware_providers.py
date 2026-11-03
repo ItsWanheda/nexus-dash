@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import platform
+import re
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +62,39 @@ def collect_system_inventory() -> dict[str, Any]:
     }
 
 
+
+def _pci_device_name(vendor_id: str, device_id: str) -> str | None:
+    """Resolve marketing/device labels from locally installed pci.ids databases."""
+    vendor = str(vendor_id or "").lower().removeprefix("0x").zfill(4)
+    device = str(device_id or "").lower().removeprefix("0x").zfill(4)
+    if not re.fullmatch(r"[0-9a-f]{4}", vendor) or not re.fullmatch(r"[0-9a-f]{4}", device):
+        return None
+    candidates = (
+        Path("/usr/share/hwdata/pci.ids"),
+        Path("/usr/share/misc/pci.ids"),
+        Path("/usr/share/pci.ids"),
+        Path("/var/lib/pci.ids"),
+    )
+    for database in candidates:
+        try:
+            current_vendor = None
+            for line in database.read_text(encoding="utf-8", errors="replace").splitlines():
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("\t\t"):
+                    continue
+                if line.startswith("\t"):
+                    match = re.match(r"^\t([0-9a-fA-F]{4})\s+(.+)$", line)
+                    if current_vendor == vendor and match and match.group(1).lower() == device:
+                        return match.group(2).strip()[:160]
+                    continue
+                match = re.match(r"^([0-9a-fA-F]{4})\s+(.+)$", line)
+                current_vendor = match.group(1).lower() if match else None
+        except OSError:
+            continue
+    return None
+
+
 def collect_gpu_inventory() -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     if platform.system() == "Linux":
@@ -78,6 +112,7 @@ def collect_gpu_inventory() -> list[dict[str, Any]]:
             vendor = vendors[vendor_id]
             product_id = _read(device / "device") or "unknown"
             model = _read(device / "product_name") or _read(device / "label")
+            model = model or _pci_device_name(vendor_id, product_id)
             output.append({
                 "name": model or f"{vendor} PCI graphics device {product_id}",
                 "vendor": vendor, "device_id": product_id, "pci_address": device.name,
@@ -90,14 +125,21 @@ def collect_gpu_inventory() -> list[dict[str, Any]]:
             for row in list(rows)[:16]:
                 name = str(getattr(row, "Name", "") or "Unknown GPU")[:160]
                 vendor_text = str(getattr(row, "AdapterCompatibility", "") or "")
+                pnp_id = str(getattr(row, "PNPDeviceID", "") or "")[:180]
+                vendor_match = re.search(r"VEN_([0-9A-Fa-f]{4})", pnp_id)
+                device_match = re.search(r"DEV_([0-9A-Fa-f]{4})", pnp_id)
+                vendor_code = vendor_match.group(1).lower() if vendor_match else ""
+                device_code = device_match.group(1).lower() if device_match else ""
                 lowered = vendor_text.casefold() + " " + name.casefold()
-                vendor = "AMD" if any(token in lowered for token in ("amd", "advanced micro", "radeon")) else (
-                    "NVIDIA" if any(token in lowered for token in ("nvidia", "geforce")) else
-                    "Intel" if any(token in lowered for token in ("intel", "arc")) else vendor_text[:80] or "Unknown")
+                vendor = "AMD" if vendor_code == "1002" or any(token in lowered for token in ("amd", "advanced micro", "radeon")) else (
+                    "NVIDIA" if vendor_code == "10de" or any(token in lowered for token in ("nvidia", "geforce")) else
+                    "Intel" if vendor_code == "8086" or any(token in lowered for token in ("intel", "arc")) else vendor_text[:80] or "Unknown")
+                if (not name or "basic display adapter" in name.casefold() or name.casefold() == "unknown gpu") and vendor_code and device_code:
+                    name = _pci_device_name("0x" + vendor_code, "0x" + device_code) or name
                 output.append({
                     "name": name, "vendor": vendor,
                     "driver_version": str(getattr(row, "DriverVersion", "") or "")[:80] or None,
-                    "device_id": str(getattr(row, "PNPDeviceID", "") or "")[:180] or None,
+                    "device_id": pnp_id or None,
                     "inventory_status": "Detected",
                 })
         except Exception:

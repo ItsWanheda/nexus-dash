@@ -57,6 +57,7 @@ LOCAL_AGENT = LocalAgent()
 NETWORK_SAMPLER = NetworkSampler()
 _NETWORK_ERROR_ACTIVE: set[str] = set()
 _NETWORK_QUALITY_FAILURES: dict[str, int] = {}
+_NETWORK_QUALITY_ALERT_LAST: dict[str, float] = {}
 _NETWORK_QUALITY_LAST: float = 0.0
 _ANOMALY_LAST_FIRED: dict[str, float] = {}
 _PROCESS_NETWORK_LAST: float = 0.0
@@ -334,19 +335,52 @@ def _run_network_quality_checks(settings: dict[str, Any]) -> None:
         return
     _NETWORK_QUALITY_LAST = time.time()
     for sample in sample_targets(targets):
-        TELEMETRY_STORE.record_network_quality(sample)
         key = f"{sample['host_label']}:{sample['port']}"
-        failures = _NETWORK_QUALITY_FAILURES.get(key, 0)
-        if sample["status"] == "connected":
-            _NETWORK_QUALITY_FAILURES[key] = 0
+        # With one bounded probe per minute, inter-sample latency movement is the
+        # long-window stability indicator; the on-demand probe still computes
+        # within-session jitter over multiple handshakes.
+        previous = TELEMETRY_STORE.get_network_quality("24h", 1000)
+        prior = next((item for item in reversed(previous)
+                      if item.get("host_label") == sample["host_label"]
+                      and int(item.get("port") or 0) == int(sample["port"])
+                      and item.get("tcp_latency_ms") is not None), None)
+        if sample.get("tcp_latency_ms") is not None and prior:
+            sample["jitter_ms"] = round(abs(float(sample["tcp_latency_ms"]) -
+                                                float(prior["tcp_latency_ms"])), 2)
+        TELEMETRY_STORE.record_network_quality(sample)
+        tcp_latency = sample.get("tcp_latency_ms")
+        dns_latency = sample.get("dns_latency_ms")
+        jitter = sample.get("jitter_ms")
+        loss = sample.get("packet_loss_percent")
+        is_failure = sample.get("status") != "connected"
+        is_unstable = (
+            (tcp_latency is not None and float(tcp_latency) >= 250.0)
+            or (dns_latency is not None and float(dns_latency) >= 250.0)
+            or (jitter is not None and float(jitter) >= 50.0)
+            or (loss is not None and float(loss) >= 20.0)
+        )
+        consecutive = _NETWORK_QUALITY_FAILURES.get(key, 0)
+        if is_failure or is_unstable:
+            consecutive += 1
+            _NETWORK_QUALITY_FAILURES[key] = consecutive
         else:
-            failures += 1
-            _NETWORK_QUALITY_FAILURES[key] = failures
-            if failures == 3:
-                detail = f"Three consecutive DNS/TCP checks failed for the configured target {key}."
-                TELEMETRY_STORE.record_event("network", "Network quality degradation", detail,
-                                             severity="warning", metadata={"target": key, "failures": failures})
-                _capture_incident("Network quality degradation", detail, "warning", "network-quality")
+            _NETWORK_QUALITY_FAILURES[key] = 0
+        if consecutive == 3 and time.time() - _NETWORK_QUALITY_ALERT_LAST.get(key, 0.0) >= 1800:
+            _NETWORK_QUALITY_ALERT_LAST[key] = time.time()
+            if is_failure:
+                title = "Persistent DNS or connection interruption"
+                detail = f"Three consecutive network checks failed for {key}; last status: {sample['status']}."
+            else:
+                title = "Persistent network latency or instability"
+                detail = (
+                    f"Three consecutive checks for {key} exceeded at least one stability indicator: "
+                    f"DNS {dns_latency} ms, TCP {tcp_latency} ms, latency swing {jitter} ms, "
+                    f"attempt loss {loss}%."
+                )
+            TELEMETRY_STORE.record_event("network", title, detail, severity="warning",
+                                         metadata={"target": key, "consecutive_checks": consecutive,
+                                                   "status": sample["status"]})
+            _capture_incident(title, detail, "warning", "network-quality")
 
 
 def _run_process_network_sampling(settings: dict[str, Any]) -> None:
