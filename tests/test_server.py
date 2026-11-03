@@ -212,3 +212,23 @@ def test_settings_retention_downsamples_within_sample_cap(tmp_path):
 def test_health_exposes_desktop_runtime_as_boolean():
     response = client.get("/api/health")
     assert isinstance(response.json()["desktop_runtime"], bool)
+
+
+
+def test_network_and_analytics_endpoints_have_bounded_contracts(monkeypatch):
+    import server
+    from network_metrics import NetworkSampler
+    monkeypatch.setattr(server, "NETWORK_SAMPLER", NetworkSampler())
+    network = client.get("/api/network")
+    assert network.status_code == 200
+    assert {"interfaces", "capabilities", "status"} <= network.json().keys()
+    assert network.json()["capabilities"]["ip_addresses_collected"] is False
+    connections = client.get("/api/network/connections?limit=5")
+    assert connections.status_code == 200
+    assert len(connections.json()["connections"]) <= 5
+    assert connections.json()["addresses_visible"] is False
+    assert client.get("/api/network/diagnostics?host=https://example.com").status_code == 400
+    analytics = client.get("/api/analytics?window=24h&compare_previous=true")
+    assert analytics.status_code == 200
+    assert {"metrics", "trend", "scorecards", "comparison", "incidents", "limitations"} <= analytics.json().keys()
+    assert client.get("/api/analytics?window=forever").status_code == 400

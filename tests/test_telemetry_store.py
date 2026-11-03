@@ -87,3 +87,34 @@ def test_clear_history_deletes_samples_and_events(tmp_path):
     store.clear_history()
     assert store.count() == 0
     assert store.get_events("24h", 20) == []
+
+
+
+def test_network_interface_history_stores_only_counters_and_link_metadata(tmp_path):
+    store = TelemetryStore(tmp_path / "network-history", sample_interval_seconds=0)
+    interfaces = [{
+        "name": "Ethernet", "is_up": True, "is_loopback": False, "speed_mbps": 1000, "mtu": 1500,
+        "duplex": "full", "bytes_sent": 1000, "bytes_recv": 2000, "packets_sent": 10,
+        "packets_recv": 20, "errors_in": 0, "errors_out": 0, "drops_in": 0, "drops_out": 0,
+        "local_address": "192.0.2.10", "mac": "aa:bb:cc:dd:ee:ff",
+    }]
+    assert store.record_network_interfaces(interfaces)
+    rows = store.get_network_history("24h", interface="Ethernet", limit_per_interface=20)
+    assert len(rows) == 1
+    assert rows[0]["interface_name"] == "Ethernet"
+    assert "local_address" not in rows[0]
+    assert "mac" not in rows[0]
+
+
+def test_analytics_history_supports_30_day_window_and_previous_period(tmp_path):
+    store = TelemetryStore(tmp_path / "analytics-history", sample_interval_seconds=0)
+    data = {
+        "cpu": {"percent": 15}, "ram": {"percent": 20, "used_gb": 2, "total_gb": 8},
+        "disk": {"percent": 30, "used_gb": 30, "total_gb": 100},
+        "network": {"sent_bytes": 100, "recv_bytes": 200}, "gpu": {}, "storage_io": {},
+    }
+    store.record(data)
+    report = store.get_analytics_history("30d", compare_previous=True)
+    assert report["window"] == "30d"
+    assert len(report["current"]) == 1
+    assert report["previous"] == []
