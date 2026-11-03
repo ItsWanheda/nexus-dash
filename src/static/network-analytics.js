@@ -2,6 +2,7 @@
 (function (global) {
   'use strict';
   let networkTimer = null, connectionTimer = null, analyticsTimer = null;
+  let processNetworkTimer = null, networkQualityTimer = null;
   let latestAnalytics = null;
   function el(id) { return document.getElementById(id); }
   function esc(value) { return String(value == null ? '' : value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#39;"); }
@@ -24,8 +25,10 @@
       '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">LINKS / COUNTERS</span><h3>Network interfaces</h3></div><span id="network-state" class="panel-tag">LOADING</span></div><div class="table-scroll"><table class="network-table"><thead><tr><th>Interface</th><th>Link</th><th>Speed</th><th>Upload</th><th>Download</th><th>Errors</th><th>Drops</th></tr></thead><tbody id="network-interface-rows"><tr><td colspan="7" class="table-message">Loading counters…</td></tr></tbody></table></div><p class="table-note">Initial rate readings warm up after service start or adapter reconnect. IP and MAC addresses are not collected or stored.</p></section>'+
       '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">HISTORY / TRAFFIC</span><h3>Upload and download</h3></div><div class="network-history-controls"><select id="network-history-window" class="flight-select"><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h" selected>24 hours</option><option value="7d">7 days</option><option value="30d">30 days</option></select><button class="text-button" data-action="network-history-refresh" type="button">Refresh history</button></div></div><div id="network-history-chart" class="deep-chart"><p class="empty-state">Loading history…</p></div><p class="table-note">This chart uses bounded aggregate system traffic buckets across the full selected window. Per-interface counters are shown above and summarized in Advanced Analytics.</p><div class="deep-chart-legend"><span class="upload-legend">Upload</span><span class="download-legend">Download</span></div></section>'+
       '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">LIVE SOCKET TABLE</span><h3>Connections and process attribution</h3></div><button class="text-button" data-action="network-connections-refresh" type="button">↻ Refresh connections</button></div><div class="connection-options"><label><input id="network-reveal-addresses" type="checkbox"> Reveal local and remote IP addresses for this view</label><span id="network-connection-status" class="panel-tag">LOADING</span></div><div id="network-connection-summary" class="connection-summary"></div><div class="table-scroll"><table class="network-table"><thead><tr><th>Process</th><th>PID</th><th>Protocol</th><th>State</th><th>Local port</th><th>Remote endpoint</th></tr></thead><tbody id="network-connection-rows"><tr><td colspan="6" class="table-message">Loading connections…</td></tr></tbody></table></div><p class="table-note">Socket data is live-only and never written to the recorder. IP addresses stay hidden unless explicitly revealed. Permissions may limit visibility.</p></section>'+
+      '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">APPLICATION BANDWIDTH</span><h3>Per-process network attribution</h3></div><button class="text-button" data-action="network-process-refresh" type="button">↻ Refresh</button></div><span id="network-process-status" class="panel-tag">CHECKING</span><div id="network-process-rows" class="table-scroll"><p class="empty-state">Checking the configured OS accounting provider…</p></div><p class="table-note">This table reports measured byte rates only when a per-process accounting provider is available. Linux NetHogs is supported when installed and permitted to capture. Windows ETW/WFP and macOS per-process byte providers are not implemented in this build; socket ownership is not presented as bandwidth.</p></section>' +
+      '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">CONTINUOUS NETWORK QUALITY</span><h3>Configured target history</h3></div><button class="text-button" data-action="network-quality-refresh" type="button">↻ Refresh</button></div><span id="network-quality-status" class="panel-tag">CHECKING</span><div id="network-quality-rows" class="table-scroll"><p class="empty-state">Loading configured DNS/TCP health checks…</p></div><p class="table-note">Configure up to three host/port targets in Settings and explicitly enable monitoring. NEXUS samples them no more than once per minute. No default external targets are added.</p></section>' +
       '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">ON-DEMAND PROBE</span><h3>DNS and TCP connectivity</h3></div><span class="panel-tag">USER INITIATED</span></div><p class="muted">Resolve a host and perform up to three TCP handshakes. No HTTP request or application payload is sent. The target is not saved.</p><div class="network-probe-form"><label>Hostname or IP<input id="network-probe-host" type="text" maxlength="253" placeholder="example.com" autocomplete="off" spellcheck="false"></label><label>TCP port<input id="network-probe-port" type="number" min="1" max="65535" value="443"></label><button class="primary-button" data-action="network-diagnose" type="button">Run test</button></div><div id="network-probe-result" class="network-probe-result" aria-live="polite"></div></section>';
-    loadNetwork(); loadConnections(); loadNetworkHistory();
+    loadNetwork(); loadConnections(); loadNetworkHistory(); loadProcessNetwork(); loadNetworkQuality();
   }
 
   async function loadNetwork() {
@@ -88,6 +91,60 @@
       }).join('')+'</div><div class="chart-axis"><span>'+esc(new Date(points[0].epoch*1000).toLocaleString())+'</span><span>'+esc(new Date(points[points.length-1].epoch*1000).toLocaleString())+'</span></div>';
     } catch(error){target.innerHTML='<p class="empty-state error-text">'+esc(error.message)+'</p>';}
   }
+
+
+  function renderProcessNetwork(result) {
+    const target=el('network-process-rows');if(!target)return;
+    const items=Array.isArray(result.history)&&result.history.length?result.history:result.items||[];
+    set('network-process-status',String(result.status||'UNKNOWN').toUpperCase()+' · '+String(result.provider||'NO PROVIDER'));
+    if(!items.length){
+      target.innerHTML='<p class="empty-state">'+esc(result.reason||'No per-process bandwidth samples are available yet.')+'</p>';
+      return;
+    }
+    const latest=new Map();
+    items.forEach(item=>latest.set(Number(item.pid),item));
+    const rows=Array.from(latest.values()).sort((a,b)=>
+      (Number(b.upload_bytes_per_sec)||0)+(Number(b.download_bytes_per_sec)||0)-
+      (Number(a.upload_bytes_per_sec)||0)-(Number(a.download_bytes_per_sec)||0));
+    target.innerHTML='<table class="network-table"><thead><tr><th>Process</th><th>PID</th><th>Upload</th><th>Download</th><th>Provider</th></tr></thead><tbody>'+
+      rows.slice(0,50).map(item=>'<tr><td>'+esc(item.process_name||'Unknown')+'</td><td class="mono-cell">'+count(item.pid)+'</td><td>'+rate(item.upload_bytes_per_sec)+'</td><td>'+rate(item.download_bytes_per_sec)+'</td><td>'+esc(item.provider||result.provider||'—')+'</td></tr>').join('')+
+      '</tbody></table>';
+  }
+  async function loadProcessNetwork() {
+    const target=el('network-process-rows');if(!target)return;
+    try{
+      const result=await api('/network/processes?window=24h&limit=500');
+      renderProcessNetwork(result);
+    }catch(error){
+      set('network-process-status','UNAVAILABLE');
+      target.innerHTML='<p class="empty-state error-text">'+esc(error.message)+'</p>';
+    }
+  }
+  async function loadNetworkQuality() {
+    const target=el('network-quality-rows');if(!target)return;
+    try{
+      const result=await api('/network/quality?window=24h&limit=1000');
+      const samples=Array.isArray(result.samples)?result.samples:[];
+      const latest=new Map();
+      samples.forEach(item=>latest.set(String(item.host_label)+':'+String(item.port),item));
+      const state=result.status==='enabled'?'MONITORING ENABLED':'MONITORING DISABLED';
+      set('network-quality-status',state+' · '+String(latest.size)+' TARGETS');
+      if(!samples.length){
+        target.innerHTML='<p class="empty-state">'+(result.status==='enabled'
+          ?'No samples yet. Monitoring runs once a minute for configured targets while background recording is enabled.'
+          :'Enable continuous network quality monitoring and configure up to three host/port targets in Settings.')+'</p>';
+        return;
+      }
+      const rows=Array.from(latest.values()).sort((a,b)=>Number(b.sampled_epoch)-Number(a.sampled_epoch));
+      target.innerHTML='<table class="network-table"><thead><tr><th>Target</th><th>Status</th><th>DNS</th><th>TCP</th><th>Jitter</th><th>Loss</th><th>Last check</th></tr></thead><tbody>'+
+        rows.map(item=>'<tr><td>'+esc(item.host_label)+':'+count(item.port)+'</td><td>'+esc(item.status)+'</td><td>'+n(item.dns_latency_ms)+' ms</td><td>'+n(item.tcp_latency_ms)+' ms</td><td>'+n(item.jitter_ms)+' ms</td><td>'+n(item.packet_loss_percent)+'%</td><td>'+esc(new Date(Number(item.sampled_epoch)*1000).toLocaleString())+'</td></tr>').join('')+
+        '</tbody></table>';
+    }catch(error){
+      set('network-quality-status','UNAVAILABLE');
+      target.innerHTML='<p class="empty-state error-text">'+esc(error.message)+'</p>';
+    }
+  }
+
   async function diagnose() {
     const host=el('network-probe-host'),port=el('network-probe-port'),target=el('network-probe-result');
     if(!host||!port||!target||!host.value.trim()){if(target)target.textContent='Enter a hostname or IP address first.';return;}
@@ -210,7 +267,9 @@
     else if(target.id==='analytics-window'||target.id==='analytics-compare')loadAnalytics();
   }
   function handleAction(action) {
-    if(action==='network-refresh'){loadNetwork();loadConnections();loadNetworkHistory();return true;}
+    if(action==='network-refresh'){loadNetwork();loadConnections();loadNetworkHistory();loadProcessNetwork();loadNetworkQuality();return true;}
+    if(action==='network-process-refresh'){loadProcessNetwork();return true;}
+    if(action==='network-quality-refresh'){loadNetworkQuality();return true;}
     if(action==='network-connections-refresh'){loadConnections();return true;}
     if(action==='network-history-refresh'){loadNetworkHistory();return true;}
     if(action==='network-diagnose'){diagnose();return true;}
@@ -222,15 +281,23 @@
     if(networkTimer)clearInterval(networkTimer);
     if(connectionTimer)clearInterval(connectionTimer);
     if(analyticsTimer)clearInterval(analyticsTimer);
-    networkTimer=connectionTimer=analyticsTimer=null;
+    if(processNetworkTimer)clearInterval(processNetworkTimer);
+    if(networkQualityTimer)clearInterval(networkQualityTimer);
+    networkTimer=connectionTimer=analyticsTimer=processNetworkTimer=networkQualityTimer=null;
   }
   function afterRender() {
     stopTimers();
-    if(state.tab==='network'){networkTimer=setInterval(loadNetwork,5000);connectionTimer=setInterval(loadConnections,15000);}
+    if(state.tab==='network'){
+      loadProcessNetwork();loadNetworkQuality();
+      networkTimer=setInterval(loadNetwork,5000);
+      connectionTimer=setInterval(loadConnections,15000);
+      processNetworkTimer=setInterval(loadProcessNetwork,15000);
+      networkQualityTimer=setInterval(loadNetworkQuality,60000);
+    }
     else if(state.tab==='analytics')analyticsTimer=setInterval(loadAnalytics,30000);
   }
   async function refreshCurrentView() {
-    if(state.tab==='network'){await loadNetwork();await loadConnections();await loadNetworkHistory();}
+    if(state.tab==='network'){await loadNetwork();await loadConnections();await loadNetworkHistory();await loadProcessNetwork();await loadNetworkQuality();}
     else if(state.tab==='analytics')await loadAnalytics();
   }
   global.NexusDeepTelemetry={renderNetwork,renderAnalytics,handleChange,handleAction,afterRender,refreshCurrentView};

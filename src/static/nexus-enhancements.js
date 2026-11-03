@@ -289,7 +289,8 @@
   }
   function settingsFormMarkup(s) {
     return '<div class="settings-field"><label>Recorder interval<select id="setting-sampling" class="flight-select"><option value="5">5 seconds</option><option value="10">10 seconds</option><option value="15">15 seconds</option><option value="30">30 seconds</option></select></label><label>Retention<select id="setting-retention" class="flight-select"><option value="1">24 hours</option><option value="7">7 days</option><option value="30">30 days</option></select></label><label>Process history interval<select id="setting-process-interval" class="flight-select"><option value="5">5 seconds</option><option value="10">10 seconds</option><option value="15">15 seconds</option><option value="30">30 seconds</option></select></label><label>Excluded process names<input id="setting-exclusions" maxlength="2000" value="' + escapeHTML((s.process_exclusions || []).join(', ')) + '" placeholder="e.g. chrome.exe, code.exe"></label></div>' +
-      '<div class="settings-toggles"><label><input type="checkbox" id="setting-background" ' + (s.background_recording ? 'checked' : '') + '> Background recording</label><label><input type="checkbox" id="setting-process-history" ' + (s.process_history_enabled ? 'checked' : '') + '> Per-process history</label><label><input type="checkbox" id="setting-privacy" ' + (s.privacy_mode ? 'checked' : '') + '> Privacy mode (hide process owner and executable path)</label><label><input type="checkbox" id="setting-start-minimized" ' + (s.start_minimized ? 'checked' : '') + '> Start desktop window minimized</label></div>';
+      '<div class="settings-toggles"><label><input type="checkbox" id="setting-background" ' + (s.background_recording ? 'checked' : '') + '> Background recording</label><label><input type="checkbox" id="setting-process-history" ' + (s.process_history_enabled ? 'checked' : '') + '> Per-process history (CPU/RAM/disk)</label><label><input type="checkbox" id="setting-process-network" ' + (s.process_network_enabled ? 'checked' : '') + '> Per-process bandwidth accounting (Linux NetHogs where installed)</label><label><input type="checkbox" id="setting-network-quality" ' + (s.network_quality_enabled ? 'checked' : '') + '> Continuous network quality checks</label><label><input type="checkbox" id="setting-privacy" ' + (s.privacy_mode ? 'checked' : '') + '> Privacy mode (hide process owner and executable path)</label><label><input type="checkbox" id="setting-start-minimized" ' + (s.start_minimized ? 'checked' : '') + '> Start desktop window minimized</label></div>' +
+      '<div class="settings-field"><label>Network quality targets (max 3)<input id="setting-network-targets" maxlength="600" value="' + escapeHTML((s.network_quality_targets || []).map(item => item.host + ':' + item.port).join(', ')) + '" placeholder="example.com:443, 1.1.1.1:443"></label><p class="table-note">Only these user-entered host/port pairs are checked (at most once per minute). DNS/TCP handshakes only; no HTTP payload. Leave empty to monitor no targets.</p></div>'
   }
   async function loadSettings() {
     const form = document.getElementById('settings-form'); if (!form) return;
@@ -317,7 +318,14 @@
       background_recording: document.getElementById('setting-background').checked,
       process_history_enabled: document.getElementById('setting-process-history').checked,
       privacy_mode: document.getElementById('setting-privacy').checked,
-      start_minimized: document.getElementById('setting-start-minimized').checked
+      start_minimized: document.getElementById('setting-start-minimized').checked,
+      process_network_enabled: document.getElementById('setting-process-network').checked,
+      network_quality_enabled: document.getElementById('setting-network-quality').checked,
+      network_quality_targets: (document.getElementById('setting-network-targets').value || '').split(',').map(value => value.trim()).filter(Boolean).slice(0, 3).map(value => {
+        const index = value.lastIndexOf(':');
+        if (index > 0 && /^\d+$/.test(value.slice(index + 1))) return { host: value.slice(0, index).trim(), port: Number(value.slice(index + 1)) };
+        return { host: value, port: 443 };
+      })
     };
     try {
       const result = await api('/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -333,7 +341,7 @@
   async function importSettings(file) {
     try {
       const parsed = JSON.parse(await file.text());
-      const allowed = ['sampling_interval_seconds', 'retention_days', 'background_recording', 'process_history_enabled', 'process_history_interval_seconds', 'process_exclusions', 'privacy_mode', 'start_minimized'];
+      const allowed = ['sampling_interval_seconds', 'retention_days', 'background_recording', 'process_history_enabled', 'process_history_interval_seconds', 'process_exclusions', 'privacy_mode', 'start_minimized', 'process_network_enabled', 'network_quality_enabled', 'network_quality_targets', 'assistant_model'];
       const payload = Object.fromEntries(Object.entries(parsed).filter(([key]) => allowed.includes(key)));
       await api('/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       await loadSettings(); setText('settings-status', 'Settings imported and validated.');
@@ -393,21 +401,51 @@
         processFact('Disk write rate', p.io.write_rate_bytes_per_sec === null ? 'Unavailable' : formatBytesPerSecond(p.io.write_rate_bytes_per_sec)) +
         processFact('Handles / descriptors', handles) + processFact('Start time', new Date(p.started_at).toLocaleString()) + '</div>' +
         '<section class="process-executable"><span class="eyebrow">EXECUTABLE METADATA</span><strong>' + escapeHTML(p.executable.name || p.name) + '</strong><code>' + escapeHTML(p.executable.path || 'Executable path unavailable') + '</code><small>' + (p.executable.size_bytes === null ? 'File size unavailable' : fmt(p.executable.size_bytes / 1048576, 2) + ' MiB') + '</small></section>' +
-        '<section class="process-history"><div class="panel-heading"><div><span class="eyebrow">MEMORY / CPU HISTORY</span><h4>Observed process trend</h4></div><span class="panel-tag">' + escapeHTML(p.history_status) + '</span></div><div id="process-history-chart" class="process-history-chart">' + processHistoryMarkup(history) + '</div><p class="table-note">History is sampled only for the highest-memory processes, keyed by PID and creation time. It resets when the API restarts.</p></section>' +
+        '<section class="process-history"><div class="panel-heading"><div><span class="eyebrow">PERSISTENT PERFORMANCE HISTORY</span><h4>CPU, RAM and disk I/O trend</h4></div><div><select id="process-history-window" class="flight-select"><option value="1h">1 hour</option><option value="6h">6 hours</option><option value="24h" selected>24 hours</option><option value="7d">7 days</option><option value="30d">30 days</option></select><button class="text-button" type="button" data-action="process-history-refresh">↻ Refresh</button></div></div><div id="process-history-chart" class="process-history-chart">' + processHistoryMarkup(history) + '</div><p id="process-history-note" class="table-note">History is stored locally in SQLite and keyed by PID plus process creation time. Process exclusions and retention settings apply.</p></section>' +
         '<div class="process-compare-controls"><label>Compare with<select id="process-compare-target" class="flight-select">' + state.processes.filter(item => Number(item.pid) !== Number(p.pid) && Number(item.create_time) > 0).slice(0, 100).map(item => '<option value="' + Number(item.pid) + '" data-create-time="' + Number(item.create_time) + '">' + escapeHTML(item.name) + ' · PID ' + Number(item.pid) + '</option>').join('') + '</select></label><button class="secondary-button" data-action="process-compare" type="button">Compare processes</button></div><div id="process-compare-result"></div>';
       setText('process-inspector-title', p.name + ' · PID ' + p.pid);
+      await loadPersistentProcessHistory('24h');
       panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) { body.innerHTML = '<p class="empty-state error-text">' + escapeHTML(error.message) + '</p>'; }
   }
   function processFact(label, value) {
     return '<div class="process-fact"><span>' + escapeHTML(label) + '</span><strong>' + escapeHTML(value === null || value === undefined ? 'Unavailable' : value) + '</strong></div>';
   }
+
+  async function loadPersistentProcessHistory(windowName) {
+    const selected = state.selectedProcess;
+    const chart = document.getElementById('process-history-chart');
+    if (!selected || !chart) return;
+    const selector = document.getElementById('process-history-window');
+    const windowValue = ['1h','6h','24h','7d','30d'].includes(windowName)
+      ? windowName : (selector ? selector.value : '24h');
+    if (selector) selector.value = windowValue;
+    chart.innerHTML = '<p class="empty-state">Loading persistent process samples…</p>';
+    try {
+      const result = await api('/process-history?pid=' + selected.pid +
+        '&create_time=' + encodeURIComponent(selected.create_time) +
+        '&window=' + encodeURIComponent(windowValue));
+      chart.innerHTML = processHistoryMarkup(result.samples || []);
+      setText('process-history-note', result.storage === 'local-sqlite'
+        ? 'Persistent SQLite history · ' + result.count + ' samples · keyed by PID + creation time. The record remains available after this process exits.'
+        : 'No persistent samples for this window yet. The short in-memory history may be shown while the process is active.');
+      const status = document.querySelector('.process-history .panel-heading .panel-tag');
+      if (status) status.textContent = result.status + ' · ' + result.storage;
+    } catch (error) {
+      chart.innerHTML = '<p class="empty-state error-text">' + escapeHTML(error.message) + '</p>';
+    }
+  }
+
   function processHistoryMarkup(history) {
     if (!history.length) return '<p class="empty-state">No process samples yet. Enable process history and revisit shortly.</p>';
     const points = history.slice(-60), max = Math.max(1, ...points.map(item => Number(item.rss_mb) || 0));
-    const memory = points.map(item => '<i title="' + escapeHTML(new Date(item.timestamp).toLocaleTimeString() + ' · ' + fmt(item.rss_mb) + ' MB RAM') + '" style="height:' + Math.max(2, Number(item.rss_mb) / max * 100) + '%"></i>').join('');
-    const cpu = points.map(item => '<i title="' + escapeHTML(new Date(item.timestamp).toLocaleTimeString() + ' · ' + fmt(item.cpu_percent) + '% CPU') + '" style="height:' + Math.max(2, Math.min(100, Number(item.cpu_percent) || 0)) + '%"></i>').join('');
-    return '<div class="process-trend-series"><span>RAM history</span><div class="process-memory-bars">' + memory + '</div></div><div class="process-trend-series"><span>CPU history</span><div class="process-cpu-bars">' + cpu + '</div></div><div class="chart-axis"><span>Older</span><span>Latest</span></div>';
+    const stamp = item => new Date(Number(item.sampled_epoch || 0) * 1000).toLocaleTimeString();
+    const memory = points.map(item => '<i title="' + escapeHTML(stamp(item) + ' · ' + fmt(item.rss_mb) + ' MB RAM') + '" style="height:' + Math.max(2, Number(item.rss_mb) / max * 100) + '%"></i>').join('');
+    const cpu = points.map(item => '<i title="' + escapeHTML(stamp(item) + ' · ' + fmt(item.cpu_percent) + '% CPU') + '" style="height:' + Math.max(2, Math.min(100, Number(item.cpu_percent) || 0)) + '%"></i>').join('');
+    const ioMax = Math.max(1, ...points.map(item => Math.max(Number(item.read_bytes_per_sec)||0, Number(item.write_bytes_per_sec)||0)));
+    const read = points.map(item => '<i title="' + escapeHTML(stamp(item) + ' · read ' + fmt(item.read_bytes_per_sec) + ' B/s') + '" style="height:' + Math.max(2,(Number(item.read_bytes_per_sec)||0)/ioMax*100) + '%"></i>').join('');
+    const write = points.map(item => '<i title="' + escapeHTML(stamp(item) + ' · write ' + fmt(item.write_bytes_per_sec) + ' B/s') + '" style="height:' + Math.max(2,(Number(item.write_bytes_per_sec)||0)/ioMax*100) + '%"></i>').join('');
+    return '<div class="process-trend-series"><span>RAM history</span><div class="process-memory-bars">' + memory + '</div></div><div class="process-trend-series"><span>CPU history</span><div class="process-cpu-bars">' + cpu + '</div></div><div class="process-trend-series"><span>Disk read / write throughput</span><div class="process-cpu-bars">' + read + write + '</div></div><div class="chart-axis"><span>Older</span><span>Latest</span></div>';
   }
   async function compareProcesses() {
     const first = state.selectedProcess, select = document.getElementById('process-compare-target');
@@ -446,6 +484,7 @@
   function handleChange(target) {
     if (!target) return;
     if (target.id === 'timeline-window') loadTimeline();
+    else if (target.id === 'process-history-window') loadPersistentProcessHistory(target.value);
     else if (target.id === 'dashboard-profile') {
       workspace.profile = target.value; persistWorkspace();
       const editor = document.getElementById('dashboard-editor'); if (editor) editor.dataset.ready = '';
@@ -485,6 +524,7 @@
     if (action === 'clear-history') { clearHistory(); return true; }
     if (action === 'inspect-process') { inspectProcess(Number(target.dataset.pid), Number(target.dataset.createTime)); return true; }
     if (action === 'process-compare') { compareProcesses(); return true; }
+    if (action === 'process-history-refresh') { loadPersistentProcessHistory(); return true; }
     if (action === 'close-process-inspector') { const node = document.getElementById('process-inspector'); if (node) node.hidden = true; return true; }
     if (action === 'dashboard-edit') { const editor = document.getElementById('dashboard-editor'); if (editor) editor.hidden = !editor.hidden; return true; }
     return false;
