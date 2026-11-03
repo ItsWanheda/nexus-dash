@@ -9,6 +9,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from .windows_gpu import collect_windows_dxgi_inventory, windows_gpu_luid_key
+
 
 def _read(path: Path, limit: int = 240) -> str | None:
     try:
@@ -206,28 +208,106 @@ def _windows_wmi_gpu_inventory() -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     try:
         import wmi
-        rows = wmi.WMI(namespace=r"root\cimv2").Win32_VideoController()
+        rows = wmi.WMI(namespace=r"root\\cimv2").Win32_VideoController()
         for row in list(rows)[:32]:
             name = str(getattr(row, "Name", "") or "Display adapter")[:160]
             vendor_text = str(getattr(row, "AdapterCompatibility", "") or "")
             pnp_id = str(getattr(row, "PNPDeviceID", "") or "")[:240]
-            vendor_match = re.search(r"VEN_([0-9A-Fa-f]{4})", pnp_id)
-            device_match = re.search(r"DEV_([0-9A-Fa-f]{4})", pnp_id)
-            vendor_code = vendor_match.group(1).lower() if vendor_match else ""
-            device_code = device_match.group(1).lower() if device_match else ""
+            ven = re.search(r"VEN_([0-9A-Fa-f]{4})", pnp_id)
+            dev = re.search(r"DEV_([0-9A-Fa-f]{4})", pnp_id)
+            sub = re.search(r"SUBSYS_([0-9A-Fa-f]{8})", pnp_id)
+            rev = re.search(r"REV_([0-9A-Fa-f]{4})", pnp_id)
+            vendor_code, device_code = ven.group(1).lower() if ven else "", dev.group(1).lower() if dev else ""
             vendor = _classify_gpu_vendor(vendor_code, vendor_text, name)
             if (not name or "basic display adapter" in name.casefold()
                     or name.casefold() in {"unknown gpu", "display adapter"}) and vendor_code and device_code:
                 name = _pci_device_name(vendor_code, device_code) or name
+            subsystem = sub.group(1).lower() if sub else ""
             output.append({
-                "name": name,
-                "vendor": vendor,
-                "vendor_id": vendor_code or None,
-                "device_id": pnp_id or device_code or None,
+                "name": name, "vendor": vendor, "vendor_id": vendor_code or None,
+                "device_id": device_code or None, "pnp_device_id": pnp_id or None,
+                "subsystem_device_id": subsystem[:4] or None,
+                "subsystem_vendor_id": subsystem[4:] or None,
+                "revision": rev.group(1).lower() if rev else None,
                 "driver_version": str(getattr(row, "DriverVersion", "") or "")[:80] or None,
-                "inventory_status": "Detected",
-                "inventory_source": "Windows WMI",
+                "driver_date": str(getattr(row, "DriverDate", "") or "")[:80] or None,
+                "video_processor": str(getattr(row, "VideoProcessor", "") or "")[:160] or None,
+                "current_resolution": (
+                    f"{int(getattr(row, 'CurrentHorizontalResolution', 0) or 0)}x"
+                    f"{int(getattr(row, 'CurrentVerticalResolution', 0) or 0)}"
+                    if getattr(row, "CurrentHorizontalResolution", None)
+                    and getattr(row, "CurrentVerticalResolution", None) else None
+                ),
+                "current_refresh_rate_hz": int(getattr(row, "CurrentRefreshRate", 0) or 0) or None,
+                "inventory_status": "Detected", "inventory_source": "Windows WMI",
             })
+    except Exception:
+        pass
+    return output
+
+
+def _merge_windows_gpu_inventory(dxgi_devices, wmi_devices):
+    """Merge precise DXGI identity/memory with WMI driver and display metadata."""
+    merged = [dict(item) for item in dxgi_devices]
+    for item in wmi_devices:
+        vendor, device = str(item.get("vendor_id") or "").casefold(), str(item.get("device_id") or "").casefold()
+        matches = [row for row in merged if vendor and device
+            and str(row.get("vendor_id") or "").casefold() == vendor
+            and str(row.get("device_id") or "").casefold() == device]
+        sv, sd = str(item.get("subsystem_vendor_id") or "").casefold(), str(item.get("subsystem_device_id") or "").casefold()
+        exact = [row for row in matches if sv and sd
+            and str(row.get("subsystem_vendor_id") or "").casefold() == sv
+            and str(row.get("subsystem_device_id") or "").casefold() == sd]
+        if exact:
+            matches = exact
+        target = matches[0] if len(matches) == 1 else None
+        if target is None:
+            merged.append(dict(item))
+            continue
+        for key, value in item.items():
+            if value in (None, ""):
+                continue
+            if key == "name":
+                if not any(word in str(value).casefold() for word in ("basic display", "unknown gpu", "display adapter")):
+                    target[key] = value
+            elif not target.get(key):
+                target[key] = value
+    return merged[:32]
+
+
+def collect_windows_gpu_performance_metrics() -> dict[str, dict[str, Any]]:
+    """Read GPU Engine and AdapterMemory counters keyed by physical DXGI LUID."""
+    if platform.system() != "Windows":
+        return {}
+    try:
+        import wmi
+        cim = wmi.WMI(namespace=r"root\\cimv2")
+    except Exception:
+        return {}
+    output: dict[str, dict[str, Any]] = {}
+    try:
+        for row in list(cim.Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine())[:512]:
+            key = windows_gpu_luid_key(str(getattr(row, "Name", "") or ""))
+            try:
+                value = float(getattr(row, "UtilizationPercentage", None))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if key and 0 <= value <= 1000:
+                target = output.setdefault(key, {})
+                target["utilization_percent"] = max(value, target.get("utilization_percent", 0.0))
+    except Exception:
+        pass
+    try:
+        for row in list(cim.Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory())[:128]:
+            key = windows_gpu_luid_key(str(getattr(row, "Name", "") or ""))
+            if not key:
+                continue
+            target = output.setdefault(key, {})
+            for prop, field in (("DedicatedUsage", "memory_used_gb"), ("SharedUsage", "shared_memory_used_gb")):
+                try:
+                    target[field] = max(0.0, float(getattr(row, prop, 0) or 0)) / (1024 ** 3)
+                except (TypeError, ValueError, OverflowError):
+                    pass
     except Exception:
         pass
     return output
@@ -344,16 +424,23 @@ def collect_gpu_inventory() -> list[dict[str, Any]]:
     if system == "Linux":
         devices = _linux_gpu_inventory()
     elif system == "Windows":
-        devices = _windows_wmi_gpu_inventory()
+        devices = _merge_windows_gpu_inventory(
+            collect_windows_dxgi_inventory(), _windows_wmi_gpu_inventory()
+        )
         fallback = _windows_registry_gpu_inventory()
-        known_ids = {str(item.get("device_id") or "").casefold() for item in devices}
-        known_names = {str(item.get("name") or "").casefold() for item in devices}
         for item in fallback:
-            device_id = str(item.get("device_id") or "").casefold()
-            name = str(item.get("name") or "").casefold()
-            if (device_id and device_id in known_ids) or (name and name in known_names):
-                continue
-            devices.append(item)
+            raw_id = str(item.get("device_id") or "").casefold()
+            vendor = str(item.get("vendor_id") or "").casefold()
+            dev = re.search(r"DEV_([0-9a-f]{4})", raw_id)
+            device = dev.group(1) if dev else ""
+            duplicate = any(
+                vendor and device
+                and str(existing.get("vendor_id") or "").casefold() == vendor
+                and str(existing.get("device_id") or "").casefold() == device
+                for existing in devices
+            )
+            if not duplicate:
+                devices.append(item)
             if len(devices) >= 32:
                 break
     elif system == "Darwin":

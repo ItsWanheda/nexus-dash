@@ -22,6 +22,7 @@ from .hardware_providers import (
     collect_lhm_sensors,
     collect_linux_hwmon,
     collect_linux_gpu_metrics,
+    collect_windows_gpu_performance_metrics,
 )
 
 _NVML_LOCK = threading.Lock()
@@ -176,6 +177,19 @@ def _gpu_inventory_row(item: dict[str, Any], index: int) -> dict[str, Any]:
         "driver": item.get("driver"),
         "driver_version": item.get("driver_version"),
         "inventory_source": item.get("inventory_source"),
+        "pnp_device_id": item.get("pnp_device_id"),
+        "subsystem_vendor_id": item.get("subsystem_vendor_id"),
+        "subsystem_device_id": item.get("subsystem_device_id"),
+        "revision": item.get("revision"),
+        "adapter_luid": item.get("adapter_luid"),
+        "adapter_type": item.get("adapter_type"),
+        "dedicated_video_memory_gb": item.get("dedicated_video_memory_gb"),
+        "dedicated_system_memory_gb": item.get("dedicated_system_memory_gb"),
+        "shared_system_memory_gb": item.get("shared_system_memory_gb"),
+        "video_processor": item.get("video_processor"),
+        "driver_date": item.get("driver_date"),
+        "current_resolution": item.get("current_resolution"),
+        "current_refresh_rate_hz": item.get("current_refresh_rate_hz"),
         "reason": "The display adapter is identified, but the operating system or installed drivers did not expose live sensor values.",
     }
     for field in _GPU_METRIC_FIELDS:
@@ -359,12 +373,38 @@ def _apply_lhm_gpu_sensors(devices: list[dict[str, Any]], sensors: list[dict[str
             device["reason"] = None
 
 
+def _apply_windows_gpu_metrics(devices: list[dict[str, Any]]) -> None:
+    if platform.system() != "Windows":
+        return
+    try:
+        metrics = collect_windows_gpu_performance_metrics()
+    except Exception:
+        return
+    for device in devices:
+        row = metrics.get(str(device.get("adapter_luid") or "").casefold(), {})
+        value = row.get("utilization_percent")
+        if value is not None and 0 <= value <= 100:
+            device["utilization_percent"] = _reading(value, "%", "Windows GPU Engine counters")
+        used = row.get("memory_used_gb")
+        if used is not None and used >= 0:
+            device["memory_used_gb"] = _reading(used, "GiB", "Windows GPU AdapterMemory counters")
+            total = device.get("dedicated_video_memory_gb")
+            if isinstance(total, (int, float)) and total > 0:
+                device["memory_total_gb"] = _reading(total, "GiB", "Windows DirectX DXGI")
+                device["memory_utilization_percent"] = _reading(
+                    min(100.0, used / total * 100), "%", "Windows GPU AdapterMemory counters"
+                )
+        if _gpu_has_live_metrics(device):
+            device["status"], device["reason"] = "Available", None
+
+
 def _gpu_devices() -> list[dict[str, Any]]:
     """Detect all OS-visible display adapters and merge optional live telemetry."""
     global _NVML_READY
     inventory = collect_gpu_inventory()
     devices = [_gpu_inventory_row(item, index) for index, item in enumerate(inventory[:32])]
     _apply_linux_gpu_metrics(devices)
+    _apply_windows_gpu_metrics(devices)
 
     vendor_devices: list[dict[str, Any]] = []
     try:
