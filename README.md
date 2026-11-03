@@ -14,10 +14,11 @@ This major release adds evidence-based diagnostics. See [CHANGELOG.md](CHANGELOG
 
 ### Live system monitoring
 - CPU utilisation per core and available frequency/temperature sensors, RAM availability/cache/swap/pressure, system volumes, network counters/rates, uptime, and host profile.
-- Hardware view for available CPU, NVIDIA GPU, motherboard temperature/fan, and battery telemetry. Voltage, battery health, charge cycles, and unsupported sensors remain explicitly unavailable.
-- Optional NVIDIA GPU utilisation, memory, temperature, power, and clock telemetry via NVML when compatible hardware, drivers, and the nvidia-ml-py package are available.
+- Hardware view for system manufacturer/model, SMBIOS/DMI motherboard and BIOS identity, CPU/board temperatures, fan RPM, battery and memory-pressure telemetry.
+- GPU inventory recognises AMD, NVIDIA and Intel adapters through Windows WMI or Linux PCI identifiers. NVIDIA live telemetry uses NVML; supported Linux AMDGPU/ROCm systems can use AMD SMI. Older or unsupported cards remain visible as **Inventory only** when no live provider is available.
+- Windows can read expanded CPU/board/GPU/fan sensors from LibreHardwareMonitor when its WMI provider is running. Linux reads psutil and kernel hwmon values where drivers expose them. Fan monitoring is read-only.
 - Storage view for read/write throughput, IOPS, per-device activity/latency where supported, top process I/O, drive capacity, and optional SMART health.
-- Unsupported GPU telemetry is explicitly unavailable; the interface does not invent readings.
+- Unsupported readings are explicitly unavailable; NEXUS does not infer or fabricate sensor values.
 
 ### System Flight Recorder
 - Local SQLite telemetry history that survives page reloads and browser restarts.
@@ -27,16 +28,19 @@ This major release adds evidence-based diagnostics. See [CHANGELOG.md](CHANGELOG
 - Background recording continues while the local API is running, even when the dashboard tab is not open.
 
 ### Process intelligence
-- Filterable process snapshot with CPU, memory, state, and guarded termination.
-- Parent/child process tree for understanding process relationships.
-- Tree snapshots are bounded and best-effort; permissions and short-lived processes can limit visibility.
-- Termination remains restricted to same-user processes and protected PIDs are rejected.
+- Filterable process snapshot, parent/child process tree, identity-checked process inspection, and guarded termination.
+- Persistent per-process CPU, resident memory, thread count and disk read/write counters/rates stored in local SQLite while process history is enabled.
+- Process history is keyed by PID plus creation time, so PID reuse does not merge unrelated applications. The recorder samples a bounded top set of processes and honours configured exclusions.
+- Process paths, command lines and user names are not written to persistent process history. Process names and PIDs are persisted for historical attribution.
+- Termination remains restricted to eligible same-user processes and protected PIDs are rejected.
 
 ### Network Intelligence
 - Dedicated Network view with per-interface upload/download throughput, packet rates, link state, speed, MTU, duplex, and packet error/drop deltas.
 - Locally recorded per-interface history and link transitions, with reset-aware rate calculations.
-- Live TCP/UDP socket inventory with process attribution, protocol/state breakdowns and ports. IP addresses stay hidden unless explicitly revealed for the current view; socket rows are not persisted.
-- On-demand DNS and TCP handshake tests report resolver latency, connect latency, jitter and failed attempts. The test sends no HTTP request or application payload and does not save the target host.
+- Live TCP/UDP socket inventory with process ownership, protocol/state breakdowns and ports. IP addresses stay hidden unless explicitly revealed for the current view; socket rows are not persisted.
+- Optional per-process byte-rate attribution through NetHogs on Linux. The provider must be installed, enabled in Settings, and permitted to capture. Windows ETW/WFP and macOS byte-accounting providers are not implemented yet; socket ownership is not presented as bandwidth.
+- Optional continuous DNS/TCP quality checks for up to three user-configured host/port targets, at most once per minute while background recording is enabled. Three consecutive unhealthy checks create a timeline event and incident capture.
+- On-demand DNS and TCP handshake tests report resolver latency, connect latency, within-probe jitter and failed TCP attempts. Continuous checks report the change between successive latency samples as a latency swing; they do not send HTTP requests or application payloads.
 
 ### Advanced Analytics
 - Historical CPU, memory, disk and aggregate network summaries for 1-hour, 6-hour, 24-hour, 7-day and 30-day windows.
@@ -45,13 +49,19 @@ This major release adds evidence-based diagnostics. See [CHANGELOG.md](CHANGELOG
 - Independent CPU, memory, storage and network evidence scorecards. Thermal history is explicitly shown as not recorded; NEXUS does not invent readings or combine metrics into an arbitrary health score.
 - Missing samples are not interpolated. Network-interface history is bounded independently and can cover up to 20,000 retained samples per interface in analytics.
 
-### Bottleneck Detective — diagnostics
-- Analyses real Flight Recorder samples for sustained CPU saturation, system-memory pressure, system-volume capacity pressure, and disk I/O activity/latency signals where supported.
-- Tracks process resident-memory growth in a bounded in-memory buffer and reports observed growth/rate; this is a lead, not proof of a leak.
-- Correlates available OS crash/hang indicators with nearby resource-pressure windows without asserting causation.
-- Provides evidence-backed findings with severity, observed values, confidence limits, and practical next steps.
-- Exports an on-demand JSON troubleshooting report with bounded telemetry, findings, process-memory candidates, and sanitised event metadata.
+### Bottleneck Detective — diagnostics and forensics
+- Analyses recorded system telemetry and persistent process samples for CPU/RAM pressure, memory growth, disk throughput/activity/latency, and best-effort OS crash/hang indicators.
+- Uses a rolling median/MAD baseline after at least 20 historical baseline samples, with explicit threshold/step-change fallbacks when MAD is zero. Findings are explanations for investigation, not proof of root cause.
+- Captures local forensic incidents around resource threshold crossings, adaptive anomalies and sustained configured network-quality failures; users can also capture a snapshot manually.
+- Incident evidence is bounded and locally stored. It can include recent resource samples, process names/PIDs and metrics, network-quality target labels/ports, process-network byte rates when available, and timeline events.
+- Exports on-demand diagnostic reports and individual incident JSON captures. Review process and target information before sharing.
 - OS event collection is best-effort: Windows uses optional pywin32, Linux checks readable system logs, and macOS checks DiagnosticReports metadata.
+
+### NEXUS Sentinel — local AI assistant
+- Optional Ollama-backed assistant running at 127.0.0.1:11434; the default model is qwen3.5:4b.
+- The model selector shows only models already installed locally. NEXUS never downloads a model, calls a cloud inference API, or gives the model command-execution tools.
+- The context toggle controls whether recent local telemetry, adaptive findings, sampled process summaries, network-quality samples and incident metadata are sent to the local model.
+- A deterministic built-in diagnostic guide is used when Ollama or the selected model is unavailable. It is a fallback guide, not an LLM; no cloud fallback is attempted.
 
 ### Configurable resource alerts
 - CPU, RAM, and system-volume threshold percentages.
@@ -61,9 +71,9 @@ This major release adds evidence-based diagnostics. See [CHANGELOG.md](CHANGELOG
 
 ### Security and accessibility
 - Loopback-only API; browser origin allowlist; restrictive CORS; trusted-host validation.
-- Read-only diagnostic console with exact built-in commands instead of shell execution.
+- CMD-like diagnostic terminal with useful, explicit allowlisted commands. It is not a general shell and does not support arbitrary PowerShell/CMD input, command chaining or destructive execution.
 - Bounded API input, structured errors, responsive navigation, keyboard focus states, and reduced-motion support.
-- No front-end framework, package-manager build step, external analytics, or telemetry upload.
+- No cloud telemetry upload or external analytics. Optional local network-quality targets and local model context are user-controlled.
 
 ## Stack
 
@@ -114,13 +124,21 @@ Open a second terminal in the repository root:
 
 Open <http://127.0.0.1:5500>. Do not open index.html through a file:// URL; the UI should be served from an allowed local origin.
 
-### 4. Optional NVIDIA GPU metrics
+### 4. Optional hardware providers
 
-    python -m pip install nvidia-ml-py
+    python -m pip install -r requirements-hardware.txt
 
-The dashboard remains usable without this optional dependency.
+This installs optional NVML, Windows WMI and Linux AMD SMI bindings. Live readings still depend on compatible hardware and drivers. On Windows, run LibreHardwareMonitor with its WMI sensor provider enabled to expose additional fan/temperature data. On Linux, AMD SMI requires a compatible AMDGPU/ROCm driver/runtime. Missing readings remain unavailable.
 
-### 5. Windows desktop application
+### 5. Optional local AI assistant
+
+Install Ollama separately, then pull the default model:
+
+    ollama pull qwen3.5:4b
+
+Start the Ollama service if it is not already running, then open NEXUS Sentinel. The model tag currently occupies approximately 3.3–4.0 GB in the Ollama library. Smaller qwen3.5:2b and qwen3.5:0.8b variants are available for systems with tighter memory budgets. NEXUS only lists installed models and never downloads one automatically.
+
+### 6. Windows desktop application
 
 For a source checkout:
 
@@ -140,7 +158,7 @@ Build the Windows x64 app and installer from PowerShell:
 
 The Windows Desktop Build workflow packages and uploads an installer and portable artifact. This first desktop target is Windows; Linux and macOS continue to use the browser-based local-server workflow. WebView2 must be available on Windows.
 
-### 6. Optional hardware providers and SMART
+### 7. Optional SMART storage health
 
     python -m pip install -r requirements-hardware.txt
 
@@ -158,10 +176,18 @@ This adds NVIDIA NVML bindings and the optional Windows WMI provider. SMART heal
 | GET | /api/network/connections?limit=150&include_addresses=false | Bounded live TCP/UDP socket inventory |
 | GET | /api/network/history?window=24h | Locally stored interface counter history |
 | GET | /api/network/diagnostics?host=example.com&port=443 | User-triggered DNS and TCP handshake diagnostics |
+| GET | /api/network/processes?window=24h | Per-process bandwidth samples/capability status (NetHogs on Linux) |
+| GET | /api/network/quality?window=24h | Continuous DNS/TCP quality history for configured targets |
+| GET | /api/anomalies?window=1h | Adaptive baseline analysis |
+| GET | /api/incidents | List local forensic captures |
+| GET | /api/incidents/{id} | Read one bounded incident evidence bundle |
+| POST | /api/incidents/capture | Manually capture current local evidence |
+| GET | /api/assistant/status | Local Ollama status and installed models |
+| POST | /api/assistant/chat | Ask NEXUS Sentinel; optionally include local telemetry context |
 | GET | /api/analytics?window=24h&compare_previous=true | Historical statistics, trends, distributions and scorecards |
 | GET | /api/processes?limit=100 | Filterable process snapshot (limit 1–200) |
 | GET | /api/processes/{pid}?create_time=... | Identity-checked detailed process inspection |
-| GET | /api/process-history?pid=...&create_time=...&window=30m | Process CPU/RAM history |
+| GET | /api/process-history?pid=...&create_time=...&window=24h | Persistent CPU/RAM/thread/disk I/O history, keyed by PID + creation time |
 | GET | /api/process-compare?... | Compare two identity-checked process snapshots |
 | GET | /api/timeline?window=24h | Local investigation timeline |
 | POST | /api/timeline/markers | Add a user incident marker |
@@ -174,7 +200,7 @@ This adds NVIDIA NVML bindings and the optional Windows WMI provider. SMART heal
 | GET | /api/history?window=1h&limit=600 | Historical samples; windows: 5m, 15m, 1h, 6h, 24h |
 | GET | /api/history/export?format=json&window=24h&limit=2000 | Download historical samples as JSON or CSV |
 | POST | /api/process/kill | Request termination of an eligible PID; body includes pid and create_time identity |
-| POST | /api/terminal | Run an exact allowlisted diagnostic; body: {"command": "status"} |
+| POST | /api/terminal | Run an allowlisted diagnostic; body: {"command": "processes 15 sort=memory"} |
 
 Interactive OpenAPI/Swagger endpoints are intentionally disabled.
 
@@ -187,7 +213,9 @@ By default, telemetry is stored in:
 
 Set NEXUS_DATA_DIR before starting the API to choose a different local data directory. The recorder creates a private directory where filesystem permissions support it. It keeps up to 1, 7, or 30 days within a 20,000-sample cap. Longer retention automatically increases the effective recording cadence (at least 130 seconds for 30 days), rather than silently truncating the selected period.
 
-Persistent samples contain resource metrics and a UTC timestamp. Hostname, OS username, executable paths, command lines, and process names are not written to the telemetry database. Process snapshots and browser event logs are collected separately for the live UI and are only included in an export when the user explicitly requests a session JSON export.
+The aggregate resource Flight Recorder table stores numeric system metrics only. When enabled, a separate process-history table stores process name, PID, process creation time, CPU, RSS memory, threads and disk I/O counters/rates. When per-process network attribution is enabled, process name, PID and measured byte rates are stored. Continuous network-quality monitoring stores the configured target label/port and DNS/TCP timing results. Incident captures can bundle recent samples and timeline events from these tables. None of these tables stores executable paths, command lines, user names, packet payloads, MAC addresses or socket IP endpoints. User-configured target labels can contain a hostname or IP address and are retained in local network-quality history until cleared/deleted.
+
+Process and network collection are controlled by Settings; process history is enabled by default in the standard settings. The Ollama context toggle is user-controlled too. Telemetry included in an assistant request is sent to the local Ollama process only, not to a hosted inference endpoint. Review incident exports before sharing.
 
 To clear history, stop NEXUS and remove the telemetry.sqlite3, telemetry.sqlite3-wal, and telemetry.sqlite3-shm files from the data directory. Browser-local alert preferences can be removed by clearing site data for the local UI origin. See docs/FLIGHT_RECORDER.md for recorder details, docs/DIAGNOSTICS.md for diagnostic thresholds, and docs/HARDWARE_STORAGE.md for hardware providers, platform limitations, SMART support, and storage counter semantics.
 
@@ -201,8 +229,9 @@ To clear history, stop NEXUS and remove the telemetry.sqlite3, telemetry.sqlite3
     node --check src/static/storage.js
     node --check src/static/nexus-enhancements.js
     node --check src/static/network-analytics.js
+    node --check src/static/assistant.js
     node --check src/static/app.js
-    python -m compileall -q server.py telemetry_store.py diagnostics.py hardware.py storage_metrics.py process_intelligence.py settings_store.py desktop_app.py network_metrics.py analytics.py tests
+    python -m compileall -q server.py telemetry_store.py diagnostics.py hardware.py hardware_providers.py storage_metrics.py process_intelligence.py settings_store.py desktop_app.py network_metrics.py analytics.py terminal_service.py process_network.py network_quality.py anomaly_detection.py local_agent.py tests
 
 CI validates Python 3.10–3.13, frontend JavaScript syntax, Python compilation, and the test suite. Local manual checks across Windows, Linux, and macOS are still recommended for process visibility and permission-dependent behaviour.
 
@@ -213,11 +242,19 @@ CI validates Python 3.10–3.13, frontend JavaScript syntax, Python compilation,
     ├── docs/FLIGHT_RECORDER.md
     ├── docs/DIAGNOSTICS.md
     ├── docs/HARDWARE_STORAGE.md
+    ├── docs/TERMINAL_SENTINEL.md
     ├── src/static/diagnostics.js
     ├── src/static/hardware.js
     ├── src/static/storage.js
     ├── src/static/network-analytics.js
+    ├── src/static/assistant.js
     ├── diagnostics.py
+    ├── terminal_service.py
+    ├── hardware_providers.py
+    ├── process_network.py
+    ├── network_quality.py
+    ├── anomaly_detection.py
+    ├── local_agent.py
     ├── hardware.py
     ├── network_metrics.py
     ├── analytics.py
