@@ -16,13 +16,15 @@ if ! command -v apt-get >/dev/null 2>&1; then
   echo "This setup currently supports Debian and Ubuntu (apt)." >&2
   exit 1
 fi
-if ! command -v sudo >/dev/null 2>&1 && [[ "$EUID" -ne 0 ]]; then
-  echo "Please install the system packages as root or install sudo." >&2
+if [[ "$EUID" -eq 0 ]]; then
+  echo "Run this installer as your regular desktop user; it will use sudo only for apt packages." >&2
   exit 1
 fi
-
-SUDO=()
-if [[ "$EUID" -ne 0 ]]; then SUDO=(sudo); fi
+if ! command -v sudo >/dev/null 2>&1; then
+  echo "sudo is required to install GTK/WebKitGTK system dependencies." >&2
+  exit 1
+fi
+SUDO=(sudo)
 
 WEBKIT_VERSION=""
 for version in 4.1 4.0; do

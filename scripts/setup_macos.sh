@@ -21,7 +21,7 @@ python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1
   exit 1
 }
 
-mkdir -p "$APP_DIR" "$BIN_HOME"
+mkdir -p "$APP_DIR" "$BIN_HOME" "$HOME/Applications"
 if [[ "$SOURCE_DIR" != "$APP_DIR" ]]; then
   if command -v rsync >/dev/null 2>&1; then
     rsync -a --delete --exclude='.git' --exclude='.venv' "$SOURCE_DIR/" "$APP_DIR/"

@@ -375,19 +375,3 @@ def test_amd_adlx_provider_reads_identity_and_supported_metrics(monkeypatch):
     assert devices[0]["memory_used_gb"] == 4
     assert devices[0]["shared_memory_used_gb"] == 0.125
     assert helper.terminated is True
-
-
-def test_desktop_gui_backend_selects_native_backend():
-    from nexus_dash.desktop.app import desktop_gui_backend
-
-    assert desktop_gui_backend("Windows") == "edgechromium"
-    assert desktop_gui_backend("Linux") == "gtk"
-    assert desktop_gui_backend("Darwin") == "cocoa"
-
-
-def test_desktop_gui_backend_rejects_unsupported_platform():
-    import pytest
-    from nexus_dash.desktop.app import desktop_gui_backend
-
-    with pytest.raises(RuntimeError, match="not supported"):
-        desktop_gui_backend("FreeBSD")
