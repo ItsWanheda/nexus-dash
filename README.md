@@ -172,22 +172,20 @@ ollama pull qwen3.5:4b
 
 Start the Ollama service if it is not already running, then open NEXUS Sentinel. Smaller qwen3.5 variants may suit systems with less memory. NEXUS only lists installed models and never downloads one automatically.
 
-### Windows desktop application
+### Desktop application and installers
+
+NEXUS-DASH uses a native desktop window with a local-only API and UI. The app selects the platform's supported WebView backend:
+- **Windows:** WebView2 / Edge Chromium; the Windows setup executable is built with Inno Setup.
+- **Debian / Ubuntu:** GTK 3 + WebKitGTK; use the setup script below to install system dependencies, create an isolated Python environment, and add an application launcher.
+- **macOS:** Cocoa / WKWebView; use the setup script below to install the app into your user Library and create a launcher.
+
+#### Windows
 
 For a source checkout:
 
-```bash
+```powershell
 python -m pip install -r requirements-desktop.txt
 python desktop_app.py
-```
-
-The desktop shell hosts the local UI and API on loopback and provides a system-tray menu. Closing the window hides it to the tray. WebView2 must be available on Windows.
-
-Sign-in startup is opt-in:
-
-```bash
-python desktop_app.py --register-startup
-python desktop_app.py --remove-startup
 ```
 
 Build the Windows x64 application and installer from PowerShell:
@@ -196,7 +194,33 @@ Build the Windows x64 application and installer from PowerShell:
 ./scripts/build_windows.ps1
 ```
 
-Linux and macOS use the browser-based local-server workflow in this release.
+The installer is per-user by default. WebView2 Runtime must be available on the machine.
+
+#### Debian / Ubuntu
+
+Clone the repository, then run:
+
+```bash
+git clone https://github.com/ItsWanheda/nexus-dash.git
+cd nexus-dash
+bash scripts/setup_linux.sh
+```
+
+The setup installs GTK/WebKitGTK system packages, creates a user-local virtual environment, installs desktop dependencies, and registers a desktop launcher. It supports Debian/Ubuntu apt-based systems with WebKitGTK 4.1 or 4.0 packages.
+
+#### macOS
+
+Install Python 3.10 or newer, clone the repository, then run:
+
+```bash
+git clone https://github.com/ItsWanheda/nexus-dash.git
+cd nexus-dash
+bash scripts/setup_macos.sh
+```
+
+The setup creates a user-local environment and installs a launcher at `~/Applications/NEXUS-DASH.command`. Start it from Terminal with `nexus-dash` or double-click the command file.
+
+> 🔒 The desktop app keeps its API and static UI bound to `127.0.0.1`. It does not expose a LAN listener. Linux and macOS setup scripts install per-user files and do not require running NEXUS-DASH as root.
 
 ## 🔌 API overview
 

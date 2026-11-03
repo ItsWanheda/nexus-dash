@@ -4,6 +4,12 @@ All notable changes to NEXUS-DASH are recorded here. Unreleased changes are part
 
 ## [Unreleased]
 
+### Added — Cross-platform desktop setup
+- Generalized the PyWebView desktop shell to use Edge Chromium on Windows, GTK/WebKitGTK on Linux, and Cocoa/WKWebView on macOS.
+- Made the system-tray integration optional so the desktop window still works where a tray backend is unavailable.
+- Added Debian/Ubuntu and macOS per-user setup scripts with dependency checks, isolated environments, and desktop/command launchers.
+- Documented platform prerequisites and setup workflows.
+
 ### Added — AMD ADLX telemetry
 - Integrated AMD's official `amd-adlx` Python binding as an optional Windows AMD provider for device identity, GPU usage, temperature/hotspot, power, core/VRAM clocks, fan percentage and VRAM usage.
 - Added optional ADLX native extension packaging to the Windows desktop build while keeping non-AMD and non-Windows installations independent of it.
