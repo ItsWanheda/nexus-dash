@@ -36,7 +36,7 @@ A missing counter or sensor is not evidence that the hardware is healthy. Activi
 
 ## Privacy and local security
 
-All new routes are protected by the existing loopback, trusted-host, and browser-origin checks. The API remains bound to `127.0.0.1`. Hardware and storage snapshots are not sent to a remote service. Persistent history includes only aggregate numeric resource/disk-I/O metrics and timestamps.
+All new routes are protected by the existing loopback, trusted-host, and browser-origin checks. The API remains bound to `127.0.0.1`. Hardware and storage snapshots are not sent to a remote service. Persistent history includes aggregate numeric resource/disk-I/O metrics, per-interface numeric counters and link metadata, interface names, and timestamps. IP addresses, MAC addresses, DNS targets, remote endpoints, and packet contents are not persisted.
 
 
 ## Network Intelligence

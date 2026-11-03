@@ -32,6 +32,19 @@ This major release adds evidence-based diagnostics. See [CHANGELOG.md](CHANGELOG
 - Tree snapshots are bounded and best-effort; permissions and short-lived processes can limit visibility.
 - Termination remains restricted to same-user processes and protected PIDs are rejected.
 
+### Network Intelligence
+- Dedicated Network view with per-interface upload/download throughput, packet rates, link state, speed, MTU, duplex, and packet error/drop deltas.
+- Locally recorded per-interface history and link transitions, with reset-aware rate calculations.
+- Live TCP/UDP socket inventory with process attribution, protocol/state breakdowns and ports. IP addresses stay hidden unless explicitly revealed for the current view; socket rows are not persisted.
+- On-demand DNS and TCP handshake tests report resolver latency, connect latency, jitter and failed attempts. The test sends no HTTP request or application payload and does not save the target host.
+
+### Advanced Analytics
+- Historical CPU, memory, disk and aggregate network summaries for 1-hour, 6-hour, 24-hour, 7-day and 30-day windows.
+- Average, minimum, maximum, median, p95, utilisation distributions, threshold frequency, UTC-hour profiles and bucketed trend charts.
+- Previous equal-length period comparisons and incident frequency by timeline category/severity.
+- Independent CPU, memory, storage and network evidence scorecards. Thermal history is explicitly shown as not recorded; NEXUS does not invent readings or combine metrics into an arbitrary health score.
+- Missing samples are not interpolated. Network-interface history is bounded independently and can cover up to 20,000 retained samples per interface in analytics.
+
 ### Bottleneck Detective — diagnostics
 - Analyses real Flight Recorder samples for sustained CPU saturation, system-memory pressure, system-volume capacity pressure, and disk I/O activity/latency signals where supported.
 - Tracks process resident-memory growth in a bounded in-memory buffer and reports observed growth/rate; this is a lead, not proof of a leak.
@@ -203,8 +216,11 @@ CI validates Python 3.10–3.13, frontend JavaScript syntax, Python compilation,
     ├── src/static/diagnostics.js
     ├── src/static/hardware.js
     ├── src/static/storage.js
+    ├── src/static/network-analytics.js
     ├── diagnostics.py
     ├── hardware.py
+    ├── network_metrics.py
+    ├── analytics.py
     ├── process_intelligence.py
     ├── network_metrics.py
     ├── analytics.py
