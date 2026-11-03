@@ -439,13 +439,27 @@
   function processHistoryMarkup(history) {
     if (!history.length) return '<p class="empty-state">No process samples yet. Enable process history and revisit shortly.</p>';
     const points = history.slice(-60), max = Math.max(1, ...points.map(item => Number(item.rss_mb) || 0));
-    const stamp = item => new Date(Number(item.sampled_epoch || 0) * 1000).toLocaleTimeString();
+    const stamp = item => {
+      const epoch = Number(item.sampled_epoch || item.epoch);
+      const value = Number.isFinite(epoch) && epoch > 0 ? epoch * 1000 : Date.parse(item.timestamp || '');
+      return Number.isFinite(value) ? new Date(value).toLocaleTimeString() : 'Time unavailable';
+    };
     const memory = points.map(item => '<i title="' + escapeHTML(stamp(item) + ' · ' + fmt(item.rss_mb) + ' MB RAM') + '" style="height:' + Math.max(2, Number(item.rss_mb) / max * 100) + '%"></i>').join('');
     const cpu = points.map(item => '<i title="' + escapeHTML(stamp(item) + ' · ' + fmt(item.cpu_percent) + '% CPU') + '" style="height:' + Math.max(2, Math.min(100, Number(item.cpu_percent) || 0)) + '%"></i>').join('');
     const ioMax = Math.max(1, ...points.map(item => Math.max(Number(item.read_bytes_per_sec)||0, Number(item.write_bytes_per_sec)||0)));
     const read = points.map(item => '<i title="' + escapeHTML(stamp(item) + ' · read ' + fmt(item.read_bytes_per_sec) + ' B/s') + '" style="height:' + Math.max(2,(Number(item.read_bytes_per_sec)||0)/ioMax*100) + '%"></i>').join('');
     const write = points.map(item => '<i title="' + escapeHTML(stamp(item) + ' · write ' + fmt(item.write_bytes_per_sec) + ' B/s') + '" style="height:' + Math.max(2,(Number(item.write_bytes_per_sec)||0)/ioMax*100) + '%"></i>').join('');
-    return '<div class="process-trend-series"><span>RAM history</span><div class="process-memory-bars">' + memory + '</div></div><div class="process-trend-series"><span>CPU history</span><div class="process-cpu-bars">' + cpu + '</div></div><div class="process-trend-series"><span>Disk read / write throughput</span><div class="process-cpu-bars">' + read + write + '</div></div><div class="chart-axis"><span>Older</span><span>Latest</span></div>';
+    const firstRam = Number(points[0].rss_mb) || 0;
+    const lastRam = Number(points[points.length - 1].rss_mb) || 0;
+    const peakRam = Math.max(...points.map(item => Number(item.rss_mb) || 0));
+    const averageCpu = points.reduce((sum, item) => sum + (Number(item.cpu_percent) || 0), 0) / points.length;
+    const delta = lastRam - firstRam;
+    const summary = '<div class="process-history-summary">' +
+      processFact('Observed RAM growth', (delta >= 0 ? '+' : '') + fmt(delta) + ' MB') +
+      processFact('Observed RAM peak', fmt(peakRam) + ' MB') +
+      processFact('Average CPU', fmt(averageCpu) + '%') +
+      processFact('Samples', points.length) + '</div>';
+    return summary + '<div class="process-trend-series"><span>RAM history</span><div class="process-memory-bars">' + memory + '</div></div><div class="process-trend-series"><span>CPU history</span><div class="process-cpu-bars">' + cpu + '</div></div><div class="process-trend-series"><span>Disk read / write throughput</span><div class="process-cpu-bars">' + read + write + '</div></div><div class="chart-axis"><span>Older</span><span>Latest</span></div>';
   }
   async function compareProcesses() {
     const first = state.selectedProcess, select = document.getElementById('process-compare-target');

@@ -100,7 +100,7 @@
       '<section class="panel sentinel-status-bar"><div><span class="eyebrow">INFERENCE PROVIDER</span><strong id="sentinel-status">CHECKING LOCAL MODEL…</strong><p id="sentinel-model-help" class="muted">Checking Ollama at 127.0.0.1:11434.</p></div><label>Installed model<select id="sentinel-model" class="flight-select"><option>Checking…</option></select></label></section>'+
       '<section class="panel sentinel-chat-panel"><div class="sentinel-chat-toolbar"><label><input type="checkbox" id="sentinel-context" checked> Include current NEXUS evidence (metrics, anomalies, recent processes and local incidents)</label><button class="text-button" type="button" data-action="sentinel-clear">Clear conversation</button></div><div id="sentinel-messages" class="sentinel-messages"></div><div class="sentinel-compose"><textarea id="sentinel-input" rows="3" maxlength="2000" placeholder="Describe the issue or ask a question… (Ctrl+Enter to send)"></textarea><button id="sentinel-send" class="primary-button" type="button" data-action="sentinel-send">Ask Sentinel</button></div><p class="table-note">Only Ollama models already installed on this computer are available. NEXUS never pulls a model automatically, never contacts a cloud inference endpoint, and never executes commands. The context toggle is optional.</p></section>';
     renderMessages();loadStatus();
-    if(pendingQuestion){const text=pendingQuestion;pendingQuestion='';const input=el('sentinel-input');if(input){input.value=text;input.focus();}}
+    if(pendingQuestion){const text=pendingQuestion;pendingQuestion='';sendMessage(text);}
   }
   function handleAction(action,target){
     if(action==='sentinel-send'){sendMessage();return true;}
@@ -112,11 +112,7 @@
   function handleChange(target){if(target&&target.id==='sentinel-model')saveModel();}
   function openWithQuestion(question){
     pendingQuestion=String(question||'Please help me troubleshoot my computer.').slice(0,1800);
-    if(state.tab==='assistant'){
-      const input=el('sentinel-input');
-      if(input){input.value=pendingQuestion;pendingQuestion='';input.focus();}
-      return;
-    }
+    if(state.tab==='assistant'){const text=pendingQuestion;pendingQuestion='';sendMessage(text);return;}
     switchTab('assistant');
   }
   function afterRender(){}

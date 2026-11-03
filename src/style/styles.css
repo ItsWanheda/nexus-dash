@@ -428,3 +428,8 @@ th, td { padding: 12px 10px; border-bottom: 1px solid var(--border); } tbody tr:
 .sentinel-compose textarea,.diagnostic-assistant-prompt textarea{width:100%;resize:vertical;min-height:76px;padding:10px;border:1px solid var(--border);border-radius:7px;background:var(--surface-raised);color:var(--text);font:12px var(--sans)}
 .sentinel-compose textarea:focus,.diagnostic-assistant-prompt textarea:focus{outline:2px solid var(--green);outline-offset:2px}
 @media(max-width:650px){.sentinel-compose{grid-template-columns:1fr}.sentinel-compose button{justify-self:end}.sentinel-message{max-width:96%}.sentinel-messages{padding:12px}}
+
+
+.process-history-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0 14px}
+.incident-actions{display:flex;gap:8px;flex-wrap:wrap}
+@media(max-width:700px){.process-history-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}

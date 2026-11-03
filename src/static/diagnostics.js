@@ -80,7 +80,7 @@ async function loadIncidentCaptures() {
   const data=await api("/incidents?limit=30");
   const items=Array.isArray(data.incidents)?data.incidents:[];
   target.innerHTML=items.length?items.map(item=>
-   '<article class="diagnostic-event-row"><time>'+escapeHTML(new Date(Number(item.created_epoch)*1000).toLocaleString())+'</time><strong>'+escapeHTML(item.title)+' · '+escapeHTML(item.severity)+'</strong><p>'+escapeHTML(item.summary)+'</p><button class="text-button" type="button" data-action="view-incident" data-incident-id="'+Number(item.id)+'">View evidence #'+Number(item.id)+'</button></article>'
+   '<article class="diagnostic-event-row"><time>'+escapeHTML(new Date(Number(item.created_epoch)*1000).toLocaleString())+'</time><strong>'+escapeHTML(item.title)+' · '+escapeHTML(item.severity)+'</strong><p>'+escapeHTML(item.summary)+'</p><div class="incident-actions"><button class="text-button" type="button" data-action="view-incident" data-incident-id="'+Number(item.id)+'">View evidence #'+Number(item.id)+'</button><button class="text-button" type="button" data-action="export-incident" data-incident-id="'+Number(item.id)+'">Download JSON</button></div></article>'
   ).join(""):'<p class="empty-state">No incident captures yet. Create one manually or wait for an automatic trigger.</p>';
  }catch(error){target.innerHTML='<p class="empty-state error-text">'+escapeHTML(error.message)+'</p>';}
 }
@@ -92,4 +92,18 @@ async function showIncidentCapture(incidentId) {
   const item=await api("/incidents/"+incidentId);
   target.textContent=JSON.stringify({id:item.id,created_epoch:item.created_epoch,title:item.title,severity:item.severity,trigger:item.trigger,summary:item.summary,evidence:item.evidence},null,2);
  }catch(error){target.textContent="Could not load incident evidence: "+error.message;}
+}
+
+
+async function exportIncident(incidentId) {
+ if(!Number.isInteger(incidentId)||incidentId<=0)return;
+ try {
+  const item=await api("/incidents/"+incidentId);
+  const blob=new Blob([JSON.stringify(item,null,2)],{type:"application/json;charset=utf-8"});
+  const url=URL.createObjectURL(blob),anchor=document.createElement("a");
+  anchor.href=url;
+  anchor.download="nexus-incident-"+incidentId+"-"+new Date(Number(item.created_epoch)*1000).toISOString().replace(/[:.]/g,"-")+".json";
+  document.body.appendChild(anchor);anchor.click();anchor.remove();
+  window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+ }catch(error){addLog("ERROR","Could not export incident #"+incidentId+": "+error.message);}
 }

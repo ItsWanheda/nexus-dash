@@ -196,23 +196,14 @@ function handleClick(event) {
       ' Explain observed evidence, likely causes with confidence, missing evidence, and safe next steps. Do not claim an unsupported root cause.';
     if (window.NexusAssistant) window.NexusAssistant.openWithQuestion(question);
   } else if (action === 'view-incident') showIncidentCapture(Number(target.dataset.incidentId));
-  else if (action === 'capture-incident') captureIncident();
-  else if (action === 'ask-sentinel-diagnostics') {
-    const symptom = document.getElementById('diagnostic-problem');
-    const detail = symptom && symptom.value.trim();
-    const summary = state.diagnostics && state.diagnostics.summary;
-    const question = 'Please investigate this problem using the latest NEXUS telemetry. User symptom: ' +
-      (detail || 'No extra symptom details provided.') + ' Current diagnostics summary: ' +
-      (summary || 'No diagnostic summary loaded yet.') +
-      ' Explain observed evidence, likely causes with confidence, missing evidence, and safe next steps. Do not claim an unsupported root cause.';
-    if (window.NexusAssistant) window.NexusAssistant.openWithQuestion(question);
-  } else if (action === 'view-incident') showIncidentCapture(Number(target.dataset.incidentId));
+  else if (action === 'export-incident') exportIncident(Number(target.dataset.incidentId));
   else if (action === 'clear-logs') {
     state.logs = [];
     renderLogs();
   } else if (action === 'terminate-process') terminateProcess(Number(target.getAttribute('data-pid')), Number(target.getAttribute('data-create-time')));
   else if (window.NexusEnhancements && window.NexusEnhancements.handleAction(action, target)) return;
   else if (window.NexusDeepTelemetry && window.NexusDeepTelemetry.handleAction(action, target)) return;
+  else if (window.NexusAssistant && window.NexusAssistant.handleAction(action, target)) return;
 }
 function closeMenu() {
   const sidebar = document.getElementById('sidebar');
