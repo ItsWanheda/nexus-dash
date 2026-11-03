@@ -191,6 +191,13 @@ class TelemetryStore:
             row = connection.execute("SELECT COUNT(*) AS total FROM telemetry_samples").fetchone()
         return int(row["total"])
 
+    def clear_history(self) -> None:
+        """Delete all stored telemetry samples and timeline events."""
+        with self._lock, closing(self._connect()) as connection:
+            connection.execute("DELETE FROM telemetry_samples")
+            connection.execute("DELETE FROM timeline_events")
+            connection.commit()
+
 
     def record_event(
         self,

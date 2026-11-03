@@ -51,7 +51,7 @@ app = FastAPI(title="NEXUS Local System API", version=DIAGNOSTICS_VERSION,
               docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]"])
 app.add_middleware(CORSMiddleware, allow_origins=sorted(ALLOWED_ORIGINS),
-                   allow_credentials=False, allow_methods=["GET", "POST", "OPTIONS"],
+                   allow_credentials=False, allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                    allow_headers=["Content-Type"], max_age=600)
 
 
@@ -142,7 +142,8 @@ def _terminal(stdout: str, stderr: str = "", returncode: int = 0) -> dict[str, A
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "nexus-local-api", "version": DIAGNOSTICS_VERSION}
+    return {"status": "ok", "service": "nexus-local-api", "version": DIAGNOSTICS_VERSION,
+            "desktop_runtime": os.environ.get("NEXUS_DESKTOP_RUNTIME") == "1"}
 
 
 def _collect_stats() -> dict[str, Any]:
@@ -353,7 +354,9 @@ def get_processes(limit: int = Query(default=100, ge=1, le=200)) -> dict[str, An
 
 @app.get("/api/settings")
 def get_settings() -> dict[str, Any]:
-    return SETTINGS_STORE.get()
+    settings = SETTINGS_STORE.get()
+    settings["desktop_runtime"] = os.environ.get("NEXUS_DESKTOP_RUNTIME") == "1"
+    return settings
 
 
 @app.put("/api/settings")
@@ -457,6 +460,16 @@ def get_history(
         LOGGER.exception("Unable to read telemetry history")
         raise HTTPException(status_code=503, detail="Telemetry history is temporarily unavailable.")
     return {"window": window, "count": len(samples), "samples": samples, "storage": "local-sqlite"}
+
+
+@app.delete("/api/history")
+def delete_history() -> dict[str, str]:
+    try:
+        TELEMETRY_STORE.clear_history()
+        return {"status": "deleted", "scope": "telemetry-and-timeline"}
+    except (OSError, sqlite3.Error):
+        LOGGER.exception("Unable to delete local telemetry history")
+        raise HTTPException(status_code=503, detail="Local telemetry history could not be deleted.")
 
 
 @app.get("/api/history/export")

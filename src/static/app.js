@@ -12,6 +12,9 @@ const NAV_ITEMS = [
   { id: 'system', label: 'System Core', icon: '⌘' },
   { id: 'security', label: 'Security', icon: '⬡' },
   { id: 'terminal', label: 'Diagnostic Terminal', icon: '>_' },
+  { id: 'timeline', label: 'Investigation Timeline', icon: '⌖' },
+  { id: 'alerts', label: 'Alert Center', icon: '!' },
+  { id: 'settings', label: 'Settings', icon: '⚙' },
   { id: 'logs', label: 'Session Logs', icon: '≡' }
 ];
 const app = document.getElementById('app');
@@ -21,6 +24,7 @@ const state = {
   hardwareTimer: null, storageTimer: null, storageHistoryTimer: null,
   previousNetwork: null, networkRates: { sent: 0, received: 0 }, processFilter: '',
   recorderHistory: [], processTree: [], processView: 'list', alerts: [], diagnostics: null, diagnosticsWindow: '1h',
+  dashboardHistory: [], selectedProcess: null, timelineWindow: '24h',
   alertConfig: { cpu: 90, ram: 90, disk: 95, consecutive: 3 }, alertCounters: {}, alertLastFired: {}
 };
 
@@ -133,6 +137,7 @@ function bindEvents() {
     if (target && target.id === 'diagnostic-window') { state.diagnosticsWindow = ['15m', '1h', '6h', '24h'].includes(target.value) ? target.value : '1h'; loadDiagnostics(); }
     if (target && target.id === 'storage-history-window') { state.storageWindow = target.value; loadStorageHistory(); }
     if (target && ['alert-cpu', 'alert-ram', 'alert-disk', 'alert-consecutive'].includes(target.id)) saveRecorderSettings();
+    if (window.NexusEnhancements) window.NexusEnhancements.handleChange(target);
   });
   app.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closeMenu();
@@ -245,7 +250,8 @@ function renderContent() {
       '<div class="view-switch"><button type="button" class="secondary-button" data-action="process-list-view" aria-pressed="true">List view</button><button type="button" class="secondary-button" data-action="process-tree-view" aria-pressed="false">Process tree</button></div>' +
       '<section class="panel" id="process-list-view"><div class="table-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="process-search" type="search" placeholder="Filter by PID, name, or status…" autocomplete="off"></label><span id="process-count" class="panel-tag">LOADING</span></div>' +
       '<div class="table-scroll"><table><thead><tr><th>PID</th><th>Process</th><th>CPU</th><th>Memory</th><th>Status</th><th>Action</th></tr></thead><tbody id="process-list"><tr><td colspan="6" class="table-message">Loading process snapshot…</td></tr></tbody></table></div><p class="table-note">Process snapshots are best-effort. Operating-system permissions can hide details or deny termination.</p></section>' +
-      '<section class="panel" id="process-tree-view" hidden><div class="panel-heading"><div><span class="eyebrow">PROCESS RELATIONSHIPS</span><h3>Parent / child tree</h3></div><span id="process-tree-count" class="panel-tag">LOADING</span></div><p class="table-note">A bounded snapshot; inaccessible or very short-lived processes may be omitted. Process-tree view is observational.</p><div id="process-tree" class="process-tree"><p class="muted">Loading process relationships…</p></div></section>';
+      '<section class="panel" id="process-tree-view" hidden><div class="panel-heading"><div><span class="eyebrow">PROCESS RELATIONSHIPS</span><h3>Parent / child tree</h3></div><span id="process-tree-count" class="panel-tag">LOADING</span></div><p class="table-note">A bounded snapshot; inaccessible or very short-lived processes may be omitted. Process-tree view is observational.</p><div id="process-tree" class="process-tree"><p class="muted">Loading process relationships…</p></div></section>' +
+      '<section class="panel process-inspector-panel" id="process-inspector" hidden><div class="panel-heading"><div><span class="eyebrow">PROCESS INTELLIGENCE</span><h3 id="process-inspector-title">Select a process</h3></div><button class="text-button" type="button" data-action="close-process-inspector">Close</button></div><div id="process-inspector-content"><p class="empty-state">Choose Inspect on a process to view detailed metadata and its observed history.</p></div></section>';
     state.processFilter = '';
     const processListView = document.getElementById('process-list-view');
     const processTreeView = document.getElementById('process-tree-view');
@@ -270,10 +276,13 @@ function renderContent() {
       '<section class="terminal-panel"><div class="terminal-topline"><span class="terminal-lights"><i></i><i></i><i></i></span><span>NEXUS_DIAGNOSTICS / LOCAL</span><button type="button" class="text-button" data-action="terminal-clear">Clear</button></div>' +
       '<div id="terminal-output" class="terminal-output" role="log" aria-live="polite"><p class="terminal-muted">NEXUS diagnostic console · v1.2</p><p class="terminal-muted">Type <strong>help</strong> to list safe, read-only commands.</p></div>' +
       '<div class="terminal-form"><label for="terminal-input" class="terminal-prompt">nexus<span>›</span></label><input id="terminal-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" placeholder="help"><button type="button" class="primary-button" data-action="terminal-send">Run</button></div><p class="terminal-footnote">Commands run as the current local user. Never paste secrets into diagnostic output.</p></section>';
+  } else if (state.tab === 'timeline' || state.tab === 'alerts' || state.tab === 'settings') {
+    if (window.NexusEnhancements) window.NexusEnhancements.renderTab(state.tab, main);
   } else if (state.tab === 'logs') {
     main.innerHTML = '<section class="page-intro"><div><div class="eyebrow">BROWSER SESSION / EVENTS</div><h2>Session logs</h2><p>Events captured while this page is open. They exist in memory and are cleared on reload.</p></div><button class="secondary-button" type="button" data-action="clear-logs">Clear logs</button></section><section class="panel"><div id="logs-list" class="logs-list"></div></section>';
     renderLogs();
   }
+  if (window.NexusEnhancements) window.NexusEnhancements.afterRender();
 }
 function updateDashboard() {
   const data = state.stats;
@@ -291,7 +300,9 @@ function updateDashboard() {
   setText('ram-inline', data.ram.percent.toFixed(1) + '%');
   setProgress('disk-bar', data.disk.percent);
   setProgress('ram-bar', data.ram.percent);
-  drawBars('cpu-chart', state.history.map(function (item) { return item.cpu; }), 'CPU');
+  if (!window.NexusEnhancements || !window.NexusEnhancements.renderDashboardChart()) {
+    drawBars('cpu-chart', state.history.map(function (item) { return item.cpu; }), 'CPU');
+  }
   setText('api-state', 'CONNECTED');
   const chip = document.getElementById('api-state');
   if (chip) chip.className = 'state-chip is-online';
@@ -380,6 +391,7 @@ async function fetchStats() {
     state.previousNetwork = { at: now, sent: data.network.sent_bytes, received: data.network.recv_bytes };
     state.stats = data;
     evaluateRecorderAlerts(data);
+    if (window.NexusEnhancements) window.NexusEnhancements.evaluateAlerts(data);
     state.history.push({ at: now, cpu: data.cpu.percent, ram: data.ram.percent });
     state.history = state.history.slice(-30);
     setConnection(true);
@@ -459,21 +471,23 @@ function renderProcessRows() {
   setText('process-count', String(rows.length) + ' MATCHING');
   if (!rows.length) { tbody.innerHTML = '<tr><td colspan="6" class="table-message">No processes match this filter.</td></tr>'; return; }
   tbody.innerHTML = rows.map(function (process) {
+    const identity = Number(process.create_time) || 0;
     const action = process.can_terminate
-      ? '<button type="button" class="danger-button" data-action="terminate-process" data-pid="' + Number(process.pid) + '">Terminate</button>'
+      ? '<button type="button" class="danger-button" data-action="terminate-process" data-pid="' + Number(process.pid) + '" data-create-time="' + identity + '">Terminate</button>'
       : '<span class="protected-label">Protected</span>';
+    const inspect = '<button type="button" class="secondary-button compact-button" data-action="inspect-process" data-pid="' + Number(process.pid) + '" data-create-time="' + identity + '">Inspect</button>';
     return '<tr><td class="mono-cell">' + Number(process.pid) + '</td><td class="process-name">' + escapeHTML(process.name) +
       '</td><td>' + Number(process.cpu).toFixed(1) + '%</td><td>' + Number(process.ram_mb).toFixed(1) +
-      ' MB</td><td><span class="process-status">' + escapeHTML(process.status) + '</span></td><td>' + action + '</td></tr>';
+      ' MB</td><td><span class="process-status">' + escapeHTML(process.status) + '</span></td><td class="process-actions">' + inspect + action + '</td></tr>';
   }).join('');
 }
-async function terminateProcess(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return;
-  const process = state.processes.find(function (item) { return item.pid === pid; });
+async function terminateProcess(pid, expectedCreateTime) {
+  if (!Number.isInteger(pid) || pid <= 0 || !Number.isFinite(expectedCreateTime) || expectedCreateTime <= 0) return;
+  const process = state.processes.find(function (item) { return item.pid === pid && Math.abs(Number(item.create_time) - expectedCreateTime) < 0.01; });
   if (!process || !process.can_terminate) { addLog('WARN', 'Blocked termination request for protected process ' + pid + '.'); return; }
   if (!window.confirm('Terminate ' + process.name + ' (PID ' + pid + ')? Unsaved work may be lost.')) return;
   try {
-    await api('/process/kill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid }) });
+    await api('/process/kill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid, create_time: expectedCreateTime }) });
     addLog('WARN', 'Termination requested for ' + process.name + ' (PID ' + pid + ').');
     await loadProcesses();
   } catch (error) {
@@ -528,6 +542,7 @@ function init() {
     if (saved === 'light' || saved === 'dark') state.theme = saved;
   } catch (_) {}
   loadRecorderSettings();
+  if (window.NexusEnhancements) window.NexusEnhancements.init();
   buildShell();
   addLog('INFO', 'NEXUS dashboard session started.');
   renderContent();
