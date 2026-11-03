@@ -7,3 +7,7 @@ pywin32>=306; platform_system == "Windows"
 
 # Optional AMD live metrics for supported Linux AMDGPU/ROCm systems; not required for AMD detection.
 amdsmi>=27.1.0; platform_system == "Linux"
+
+# Official AMD ADLX Python bindings for supported AMD GPUs on 64-bit Windows.
+# Optional: native DXGI/WMI discovery and other GPU vendors work without this package.
+amd-adlx>=1.0.3; platform_system == "Windows" and platform_machine == "AMD64"

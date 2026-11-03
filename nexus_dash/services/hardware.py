@@ -19,6 +19,7 @@ from .hardware_providers import (
     collect_system_inventory,
     collect_gpu_inventory,
     collect_amd_smi_devices,
+    collect_amd_adlx_devices,
     collect_lhm_sensors,
     collect_linux_hwmon,
     collect_linux_gpu_metrics,
@@ -155,7 +156,7 @@ def _memory_pressure(percent: float) -> dict[str, Any]:
 
 _GPU_METRIC_FIELDS = (
     "utilization_percent", "memory_utilization_percent", "memory_used_gb", "memory_total_gb", "shared_memory_used_gb",
-    "temperature_c", "power_w", "graphics_clock_mhz", "memory_clock_mhz", "fan_percent", "fan_rpm",
+    "temperature_c", "hotspot_temperature_c", "power_w", "graphics_clock_mhz", "memory_clock_mhz", "fan_percent", "fan_rpm",
 )
 _GPU_CACHE_LOCK = threading.Lock()
 _GPU_CACHE: list[dict[str, Any]] | None = None
@@ -195,7 +196,7 @@ def _gpu_inventory_row(item: dict[str, Any], index: int) -> dict[str, Any]:
     for field in _GPU_METRIC_FIELDS:
         unit = "%" if field.endswith("percent") else (
             "GiB" if field.endswith("_gb") else (
-                "°C" if field == "temperature_c" else (
+                "°C" if field in {"temperature_c", "hotspot_temperature_c"} else (
                     "W" if field == "power_w" else (
                         "MHz" if field.endswith("_mhz") else "RPM" if field == "fan_rpm" else "%"
                     )
@@ -462,6 +463,10 @@ def _gpu_devices() -> list[dict[str, Any]]:
     except Exception:
         pass
 
+    try:
+        vendor_devices.extend(collect_amd_adlx_devices())
+    except Exception:
+        pass
     try:
         vendor_devices.extend(collect_amd_smi_devices())
     except Exception:

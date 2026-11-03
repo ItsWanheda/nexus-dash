@@ -527,6 +527,84 @@ def collect_linux_gpu_metrics(
 
 
 
+def collect_amd_adlx_devices() -> list[dict[str, Any]]:
+    """Read AMD Windows GPU identity and supported live metrics through AMD's ADLX SDK."""
+    if platform.system() != "Windows":
+        return []
+    try:
+        from adlx import ADLX
+    except ImportError:
+        return []
+    helper = None
+    initialized = False
+    output: list[dict[str, Any]] = []
+
+    def read_metric(metrics, method_name: str):
+        try:
+            value = getattr(metrics, method_name)()
+            if value is None:
+                return None
+            number = float(value)
+            return number if number == number and abs(number) != float("inf") else None
+        except (AttributeError, TypeError, ValueError, OverflowError, RuntimeError):
+            return None
+
+    def pci_id(value):
+        try:
+            number = int(value, 0) if isinstance(value, str) else int(value)
+            return f"{number:04x}" if 0 <= number <= 0xffff else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    try:
+        helper = ADLX.ADLXHelper()
+        result = helper.Initialize()
+        if result != ADLX.ADLX_RESULT.ADLX_OK:
+            return []
+        initialized = True
+        system = helper.GetSystemServices()
+        monitoring = system.GetPerformanceMonitoringServices()
+        for index, gpu in enumerate(list(system.GetGPUs())[:32]):
+            name = str(gpu.Name() or f"AMD GPU {index}")[:160]
+            vendor_id = pci_id(gpu.VendorId())
+            device_id = pci_id(gpu.DeviceId())
+            metrics = monitoring.GetCurrentGPUMetrics(gpu)
+            if metrics is None:
+                output.append({
+                    "name": name, "vendor": "AMD", "vendor_id": vendor_id,
+                    "device_id": device_id, "inventory_source": "AMD ADLX",
+                })
+                continue
+            row: dict[str, Any] = {
+                "name": name, "vendor": "AMD", "vendor_id": vendor_id,
+                "device_id": device_id, "inventory_source": "AMD ADLX",
+                "utilization_percent": read_metric(metrics, "GPUUsage"),
+                "temperature_c": read_metric(metrics, "GPUTemperature"),
+                "hotspot_temperature_c": read_metric(metrics, "GPUHotspotTemperature"),
+                "power_w": read_metric(metrics, "GPUPower"),
+                "graphics_clock_mhz": read_metric(metrics, "GPUClockSpeed"),
+                "memory_clock_mhz": read_metric(metrics, "GPUVRAMClockSpeed"),
+                "fan_percent": read_metric(metrics, "GPUFanSpeed"),
+            }
+            # ADLX documents GPUVRAM in MB. Convert only when the SDK returns a value.
+            vram_mb = read_metric(metrics, "GPUVRAM")
+            if vram_mb is not None and vram_mb >= 0:
+                row["memory_used_gb"] = vram_mb / 1024.0
+            shared_mb = read_metric(metrics, "GPUSharedMemory")
+            if shared_mb is not None and shared_mb >= 0:
+                row["shared_memory_used_gb"] = shared_mb / 1024.0
+            output.append(row)
+    except Exception:
+        return output
+    finally:
+        if initialized and helper is not None:
+            try:
+                helper.Terminate()
+            except Exception:
+                pass
+    return output
+
+
 def collect_amd_smi_devices() -> list[dict[str, Any]]:
     """AMD SMI live metrics on supported Linux AMDGPU/ROCm hosts."""
     if platform.system() != "Linux":

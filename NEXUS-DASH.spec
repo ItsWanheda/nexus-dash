@@ -3,11 +3,15 @@ from PyInstaller.utils.hooks import collect_all
 webview_datas, webview_binaries, webview_hidden = collect_all("webview")
 tray_datas, tray_binaries, tray_hidden = collect_all("pystray")
 pil_datas, pil_binaries, pil_hidden = collect_all("PIL")
+try:
+    adlx_datas, adlx_binaries, adlx_hidden = collect_all("adlx")
+except Exception:
+    adlx_datas, adlx_binaries, adlx_hidden = [], [], []
 a = Analysis(
     ["desktop_app.py"], pathex=[],
-    binaries=webview_binaries + tray_binaries + pil_binaries,
-    datas=[("index.html", "."), ("src", "src")] + webview_datas + tray_datas + pil_datas,
-    hiddenimports=webview_hidden + tray_hidden + pil_hidden + [
+    binaries=webview_binaries + tray_binaries + pil_binaries + adlx_binaries,
+    datas=[("index.html", "."), ("src", "src")] + webview_datas + tray_datas + pil_datas + adlx_datas,
+    hiddenimports=webview_hidden + tray_hidden + pil_hidden + adlx_hidden + [
         "uvicorn.logging", "uvicorn.loops.auto", "uvicorn.protocols.http.auto",
         "uvicorn.lifespan.on", "webview.platforms.edgechromium",
     ],
