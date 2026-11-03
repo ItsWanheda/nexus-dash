@@ -10,11 +10,14 @@ import logging
 import math
 import os
 import platform
+import re
 import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import psutil
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -352,6 +355,51 @@ def get_processes(limit: int = Query(default=100, ge=1, le=200)) -> dict[str, An
     items.sort(key=lambda item: (item["cpu"], item["ram_mb"]), reverse=True)
     return {"items": items[:limit], "count": min(len(items), limit),
             "sampled_at": datetime.now(timezone.utc).isoformat()}
+
+
+
+
+@app.get("/api/updates/check")
+def check_for_updates() -> dict[str, Any]:
+    """Manually check the latest published GitHub release; no code is downloaded or installed."""
+    current = DIAGNOSTICS_VERSION
+    request = Request(
+        "https://api.github.com/repos/ItsWanheda/nexus-dash/releases/latest",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "NEXUS-DASH-update-check"},
+    )
+    try:
+        with urlopen(request, timeout=4) as response:
+            release = json.loads(response.read(512_000).decode("utf-8"))
+    except HTTPError as exc:
+        if exc.code == 404:
+            return {"status": "no-release", "current_version": current, "update_available": False,
+                    "message": "No published GitHub release is available yet."}
+        return {"status": "unavailable", "current_version": current,
+                "update_available": False, "message": "GitHub release information is temporarily unavailable."}
+    except (OSError, URLError, TimeoutError, ValueError):
+        return {"status": "unavailable", "current_version": current,
+                "update_available": False, "message": "Could not reach GitHub to check for a published release."}
+
+    tag = str(release.get("tag_name") or "").strip()
+    latest = tag[1:] if tag.lower().startswith("v") else tag
+    if not latest or not re.fullmatch(r"\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?", latest):
+        return {"status": "unavailable", "current_version": current,
+                "update_available": False, "message": "The latest release tag is not a supported version format."}
+    def version_parts(value: str) -> tuple[int, ...]:
+        match = re.match(r"^(\d+(?:\.\d+){1,3})", value)
+        return tuple(int(part) for part in match.group(1).split(".")) if match else (0,)
+    current_parts, latest_parts = version_parts(current), version_parts(latest)
+    width = max(len(current_parts), len(latest_parts))
+    available = latest_parts + (0,) * (width - len(latest_parts)) > current_parts + (0,) * (width - len(current_parts))
+    release_url = str(release.get("html_url") or "")
+    if not release_url.startswith("https://github.com/ItsWanheda/nexus-dash/releases/"):
+        release_url = ""
+    return {
+        "status": "update-available" if available else "up-to-date",
+        "current_version": current, "latest_version": latest, "update_available": available,
+        "release_url": release_url, "published_at": release.get("published_at"),
+        "message": "A newer release is available." if available else "NEXUS-DASH is up to date with the latest published release.",
+    }
 
 
 @app.get("/api/settings")

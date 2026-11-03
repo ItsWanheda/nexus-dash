@@ -4,6 +4,15 @@ All notable changes to NEXUS-DASH are recorded here. Unreleased changes are part
 
 ## [Unreleased]
 
+### Added — Process Intelligence, Investigation Timeline, Alert Center, Custom Workspace, Settings, and Windows Desktop
+- Added identity-checked process inspection, CPU/RAM history and observed memory growth, two-process comparison, threads, uptime, disk I/O, executable metadata, and OS-dependent handles/file descriptors.
+- Added a local SQLite investigation timeline with resource-pressure and process lifecycle events plus user-authored incident markers.
+- Added local resource alerts with consecutive-sample thresholds, cooldowns, hysteresis, acknowledge/snooze, resolved history, and opt-in browser notifications.
+- Added General, Gaming, Developer, Workstation, and Laptop dashboard profiles with widget visibility, drag ordering, sizing, historical range/style, and configurable chart refresh.
+- Added validated settings import/export, process exclusions, background recording, privacy redaction, explicit local history deletion, and 1/7/30-day retention with bounded-sample-aware downsampling.
+- Added a Windows-first PyWebView desktop runtime with system tray, close-to-tray, opt-in sign-in startup, manual published-release checks, PyInstaller packaging, Inno Setup recipe, and Windows build workflow.
+- Windows packaging is CI-built; interactive window/tray behaviour still requires a smoke test on a target Windows machine.
+
 ### Added — Advanced hardware and storage intelligence
 - Added component-level CPU/core, memory pressure, NVIDIA GPU, motherboard sensor, and battery telemetry with explicit Available/Unavailable states; optional providers remain optional.
 - Added live disk throughput, IOPS, per-device activity and latency where exposed, bounded top-process I/O snapshots, drive capacity, and optional read-only SMART health queries through smartctl.

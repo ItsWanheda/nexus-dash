@@ -284,12 +284,12 @@
     main.innerHTML = '<section class="page-intro"><div><div class="eyebrow">LOCAL CONFIGURATION / DATA LIFECYCLE</div><h2>Settings & Configuration</h2><p>Control the recorder, retention, process sampling, privacy, and desktop behaviour. Settings stay in your local NEXUS data directory.</p></div></section>' +
       '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">RECORDER</span><h3>Sampling and retention</h3></div><span class="panel-tag">LOCAL JSON</span></div><div id="settings-form" class="settings-grid"><p class="empty-state">Loading saved settings…</p></div><div class="settings-actions"><button class="primary-button" data-action="save-settings" type="button">Save settings</button><button class="secondary-button" data-action="export-settings" type="button">Export settings</button><label class="secondary-button file-import-label">Import settings<input id="settings-import" type="file" accept="application/json,.json" hidden></label><button class="danger-button" data-action="clear-history" type="button">Delete local telemetry history</button></div><p id="settings-status" class="table-note" aria-live="polite"></p></section>' +
       '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">DATA LOCATION</span><h3>Local storage</h3></div></div><div id="settings-location" class="settings-location">Reading current storage location…</div><p class="table-note">Changing the data directory requires restarting NEXUS. Set NEXUS_DATA_DIR before launch. Retention changes are enforced on subsequent writes.</p></section>' +
-      '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">DESKTOP CLIENT</span><h3>Windows desktop mode</h3></div><span class="panel-tag" id="desktop-runtime-status">BROWSER MODE</span></div><p class="muted">The packaged Windows client embeds the local API in a native WebView window and can stay in the system tray. Startup registration is opt-in and is enabled only through an explicit desktop command-line action.</p><div class="mini-facts"><span>Desktop runtime</span><strong id="desktop-runtime-detail">Checking</strong><span>Startup mode</span><strong>Opt-in</strong><span>Network exposure</span><strong>Loopback only</strong></div></section>';
+      '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">DESKTOP CLIENT</span><h3>Windows desktop mode</h3></div><span class="panel-tag" id="desktop-runtime-status">BROWSER MODE</span></div><p class="muted">The packaged Windows client embeds the local API in a native WebView window and can stay in the system tray. Startup registration is opt-in and is enabled only through an explicit desktop command-line action.</p><div class="mini-facts"><span>Desktop runtime</span><strong id="desktop-runtime-detail">Checking</strong><span>Startup mode</span><strong>Opt-in</strong><span>Network exposure</span><strong>Loopback only</strong></div><div class="settings-actions"><button class="secondary-button" data-action="check-updates" type="button">Check for updates</button><span id="desktop-update-status" class="table-note" aria-live="polite">Checks the latest published GitHub release only; no automatic download or installation.</span></div></section>';
     loadSettings();
   }
   function settingsFormMarkup(s) {
     return '<div class="settings-field"><label>Recorder interval<select id="setting-sampling" class="flight-select"><option value="5">5 seconds</option><option value="10">10 seconds</option><option value="15">15 seconds</option><option value="30">30 seconds</option></select></label><label>Retention<select id="setting-retention" class="flight-select"><option value="1">24 hours</option><option value="7">7 days</option><option value="30">30 days</option></select></label><label>Process history interval<select id="setting-process-interval" class="flight-select"><option value="5">5 seconds</option><option value="10">10 seconds</option><option value="15">15 seconds</option><option value="30">30 seconds</option></select></label><label>Excluded process names<input id="setting-exclusions" maxlength="2000" value="' + escapeHTML((s.process_exclusions || []).join(', ')) + '" placeholder="e.g. chrome.exe, code.exe"></label></div>' +
-      '<div class="settings-toggles"><label><input type="checkbox" id="setting-background" ' + (s.background_recording ? 'checked' : '') + '> Background recording</label><label><input type="checkbox" id="setting-process-history" ' + (s.process_history_enabled ? 'checked' : '') + '> Per-process history</label><label><input type="checkbox" id="setting-privacy" ' + (s.privacy_mode ? 'checked' : '') + '> Privacy mode (raw samples exclude process identifiers)</label><label><input type="checkbox" id="setting-start-minimized" ' + (s.start_minimized ? 'checked' : '') + '> Start desktop window minimized</label></div>';
+      '<div class="settings-toggles"><label><input type="checkbox" id="setting-background" ' + (s.background_recording ? 'checked' : '') + '> Background recording</label><label><input type="checkbox" id="setting-process-history" ' + (s.process_history_enabled ? 'checked' : '') + '> Per-process history</label><label><input type="checkbox" id="setting-privacy" ' + (s.privacy_mode ? 'checked' : '') + '> Privacy mode (hide process owner and executable path)</label><label><input type="checkbox" id="setting-start-minimized" ' + (s.start_minimized ? 'checked' : '') + '> Start desktop window minimized</label></div>';
   }
   async function loadSettings() {
     const form = document.getElementById('settings-form'); if (!form) return;
@@ -338,6 +338,25 @@
       await api('/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       await loadSettings(); setText('settings-status', 'Settings imported and validated.');
     } catch (error) { setText('settings-status', 'Import failed: ' + error.message); }
+  }
+  async function checkUpdates() {
+    setText('desktop-update-status', 'Checking the latest published GitHub release…');
+    try {
+      const result = await api('/updates/check');
+      const message = result.status === 'update-available'
+        ? 'Update available: v' + result.latest_version + ' (current v' + result.current_version + ').'
+        : result.message || 'Update status unavailable.';
+      const target = document.getElementById('desktop-update-status');
+      if (target) {
+        target.textContent = message;
+        if (result.release_url) {
+          const link = document.createElement('a');
+          link.href = result.release_url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+          link.textContent = 'Open release notes';
+          target.appendChild(document.createTextNode(' ')); target.appendChild(link);
+        }
+      }
+    } catch (error) { setText('desktop-update-status', error.message); }
   }
   async function clearHistory() {
     if (!window.confirm('Delete all local telemetry samples and investigation timeline events? This cannot be undone.')) return;
@@ -460,6 +479,7 @@
       return true;
     }
     if (action === 'clear-resolved-alerts') { alertState.alerts = alertState.alerts.filter(item => item.status !== 'resolved'); persistAlerts(); renderAlertRows(); return true; }
+    if (action === 'check-updates') { checkUpdates(); return true; }
     if (action === 'save-settings') { saveSettings(); return true; }
     if (action === 'export-settings') { exportSettings(); return true; }
     if (action === 'clear-history') { clearHistory(); return true; }

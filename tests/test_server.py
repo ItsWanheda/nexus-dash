@@ -199,3 +199,16 @@ def test_desktop_module_imports_without_optional_gui_dependencies():
     import desktop_app
     assert desktop_app.APP_ROOT.exists()
     assert callable(desktop_app.main)
+
+
+
+def test_settings_retention_downsamples_within_sample_cap(tmp_path):
+    from settings_store import SettingsStore
+    saved = SettingsStore(tmp_path).update({"sampling_interval_seconds": 5, "retention_days": 30})
+    assert saved["effective_sampling_interval_seconds"] >= 130
+    assert "20,000 samples" in saved["retention_note"]
+
+
+def test_health_exposes_desktop_runtime_as_boolean():
+    response = client.get("/api/health")
+    assert isinstance(response.json()["desktop_runtime"], bool)

@@ -107,7 +107,27 @@ Open <http://127.0.0.1:5500>. Do not open index.html through a file:// URL; the 
 
 The dashboard remains usable without this optional dependency.
 
-### 5. Optional hardware providers and SMART
+### 5. Windows desktop application
+
+For a source checkout:
+
+    python -m pip install -r requirements-desktop.txt
+    python desktop_app.py
+
+NEXUS opens in a PyWebView/Edge WebView2 window, keeps the local UI and API on 127.0.0.1, and adds a system-tray menu with Open and Quit. Closing the window hides it to the tray. Start minimized is controlled by Settings or the explicit `--minimized` argument.
+
+Windows sign-in startup is opt-in:
+
+    python desktop_app.py --register-startup
+    python desktop_app.py --remove-startup
+
+Build the Windows x64 app and installer from PowerShell:
+
+    ./scripts/build_windows.ps1
+
+The Windows Desktop Build workflow packages and uploads an installer and portable artifact. This first desktop target is Windows; Linux and macOS continue to use the browser-based local-server workflow. WebView2 must be available on Windows.
+
+### 6. Optional hardware providers and SMART
 
     python -m pip install -r requirements-hardware.txt
 
@@ -122,12 +142,20 @@ This adds NVIDIA NVML bindings and the optional Windows WMI provider. SMART heal
 | GET | /api/hardware | Detailed CPU/core, GPU, memory, motherboard, and battery telemetry |
 | GET | /api/storage | Per-drive capacity and I/O, top process activity, and optional SMART health |
 | GET | /api/processes?limit=100 | Filterable process snapshot (limit 1–200) |
+| GET | /api/processes/{pid}?create_time=... | Identity-checked detailed process inspection |
+| GET | /api/process-history?pid=...&create_time=...&window=30m | Process CPU/RAM history |
+| GET | /api/process-compare?... | Compare two identity-checked process snapshots |
+| GET | /api/timeline?window=24h | Local investigation timeline |
+| POST | /api/timeline/markers | Add a user incident marker |
+| GET/PUT | /api/settings | Read and update local settings |
+| GET | /api/updates/check | Manually check latest published GitHub release |
+| DELETE | /api/history | Delete local telemetry and timeline history |
 | GET | /api/process-tree?limit=500 | Bounded parent/child tree (limit 1–1000) |
 | GET | /api/diagnostics?window=1h | Evidence-based findings and event correlation |
 | GET | /api/diagnostics/report?window=1h | On-demand JSON troubleshooting report |
 | GET | /api/history?window=1h&limit=600 | Historical samples; windows: 5m, 15m, 1h, 6h, 24h |
 | GET | /api/history/export?format=json&window=24h&limit=2000 | Download historical samples as JSON or CSV |
-| POST | /api/process/kill | Request termination of an eligible PID; body: {"pid": 1234} |
+| POST | /api/process/kill | Request termination of an eligible PID; body includes pid and create_time identity |
 | POST | /api/terminal | Run an exact allowlisted diagnostic; body: {"command": "status"} |
 
 Interactive OpenAPI/Swagger endpoints are intentionally disabled.
@@ -139,7 +167,7 @@ By default, telemetry is stored in:
 - **Windows:** %USERPROFILE%\.nexus-dash\telemetry.sqlite3
 - **Linux/macOS:** ~/.nexus-dash/telemetry.sqlite3
 
-Set NEXUS_DATA_DIR before starting the API to choose a different local data directory. The recorder creates a private directory where filesystem permissions support it. It keeps at most 24 hours and 20,000 samples, whichever limit is reached first, and rate-limits persistent writes to approximately one sample every five seconds.
+Set NEXUS_DATA_DIR before starting the API to choose a different local data directory. The recorder creates a private directory where filesystem permissions support it. It keeps up to 1, 7, or 30 days within a 20,000-sample cap. Longer retention automatically increases the effective recording cadence (at least 130 seconds for 30 days), rather than silently truncating the selected period.
 
 Persistent samples contain resource metrics and a UTC timestamp. Hostname, OS username, executable paths, command lines, and process names are not written to the telemetry database. Process snapshots and browser event logs are collected separately for the live UI and are only included in an export when the user explicitly requests a session JSON export.
 
@@ -153,8 +181,9 @@ To clear history, stop NEXUS and remove the telemetry.sqlite3, telemetry.sqlite3
     node --check src/static/diagnostics.js
     node --check src/static/hardware.js
     node --check src/static/storage.js
+    node --check src/static/nexus-enhancements.js
     node --check src/static/app.js
-    python -m compileall -q server.py telemetry_store.py diagnostics.py hardware.py storage_metrics.py tests
+    python -m compileall -q server.py telemetry_store.py diagnostics.py hardware.py storage_metrics.py process_intelligence.py settings_store.py desktop_app.py tests
 
 CI validates Python 3.10–3.13, frontend JavaScript syntax, Python compilation, and the test suite. Local manual checks across Windows, Linux, and macOS are still recommended for process visibility and permission-dependent behaviour.
 
@@ -170,6 +199,13 @@ CI validates Python 3.10–3.13, frontend JavaScript syntax, Python compilation,
     ├── src/static/storage.js
     ├── diagnostics.py
     ├── hardware.py
+    ├── process_intelligence.py
+    ├── settings_store.py
+    ├── desktop_app.py
+    ├── NEXUS-DASH.spec
+    ├── requirements-desktop.txt
+    ├── installer/NEXUS-DASH.iss
+    ├── scripts/build_windows.ps1
     ├── storage_metrics.py
     ├── src/static/app.js
     ├── src/static/flight-recorder.js
