@@ -1,0 +1,4 @@
+# Optional hardware telemetry providers. Install only when required.
+nvidia-ml-py>=12.0.0
+wmi>=1.5.1; platform_system == "Windows"
+pywin32>=306; platform_system == "Windows"

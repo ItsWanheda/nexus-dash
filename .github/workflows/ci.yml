@@ -36,7 +36,10 @@ jobs:
           node --check src/static/app.js
           node --check src/static/flight-recorder.js
           node --check src/static/diagnostics.js
+          node --check src/static/hardware.js
+          node --check src/static/storage.js
+          node --check src/static/nexus-enhancements.js
       - name: Compile Python sources
-        run: python -m compileall -q server.py telemetry_store.py diagnostics.py tests
+        run: python -m compileall -q server.py telemetry_store.py diagnostics.py hardware.py storage_metrics.py process_intelligence.py settings_store.py desktop_app.py tests
       - name: Run tests
         run: python -m pytest -q

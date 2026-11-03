@@ -42,6 +42,7 @@ function saveRecorderSettings() {
   };
   if (Object.values(next).some(value => !Number.isFinite(value))) return;
   state.alertConfig = next;
+  if (window.NexusEnhancements) window.NexusEnhancements.updateLegacyRules(next);
   try { localStorage.setItem(RECORDER_ALERT_STORAGE_KEY, JSON.stringify(next)); } catch (_) {}
   state.alertCounters = {};
   addLog('INFO', 'Flight Recorder alert thresholds updated.');
@@ -188,7 +189,7 @@ async function enableRecorderNotifications() {
 function flattenProcessTree(nodes, output) {
   (nodes || []).forEach(node => {
     output.push({
-      pid: Number(node.pid), name: node.name || 'Unknown', cpu: Number(node.cpu) || 0,
+      pid: Number(node.pid), create_time: Number(node.create_time) || 0, name: node.name || 'Unknown', cpu: Number(node.cpu) || 0,
       ram_mb: Number(node.ram_mb) || 0, status: node.status || 'unknown',
       can_terminate: Boolean(node.can_terminate)
     });
@@ -201,7 +202,8 @@ function processTreeNodeMarkup(node, depth) {
   const title = '<span class="tree-pid">PID ' + Number(node.pid) + '</span> <span class="tree-name">' +
     escapeHTML(node.name) + '</span><span class="tree-meta"><span>CPU ' + Number(node.cpu).toFixed(1) +
     '%</span><span>RAM ' + Number(node.ram_mb).toFixed(1) + ' MB</span><span>' +
-    escapeHTML(node.status || 'unknown') + '</span></span>';
+    escapeHTML(node.status || 'unknown') + '</span></span><button class="secondary-button compact-button tree-inspect" type="button" data-action="inspect-process" data-pid="' +
+    Number(node.pid) + '" data-create-time="' + (Number(node.create_time) || 0) + '">Inspect</button>';
   const children = Array.isArray(node.children) ? node.children : [];
   if (!children.length) return '<li><div class="tree-leaf">' + title + '</div></li>';
   const descendants = children.map(child => processTreeNodeMarkup(child, depth + 1)).join('');

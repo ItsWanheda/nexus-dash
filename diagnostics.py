@@ -154,7 +154,7 @@ def analyse_diagnostics(samples:list[dict[str,Any]],memory_growth:list[dict[str,
     for sample in samples[-2000:]:
         at=_parse_time(sample.get("timestamp") or sample.get("sampled_at"))
         if at is None:continue
-        cleaned.append({"at":at,"cpu_percent":_finite(sample.get("cpu_percent")),"ram_percent":_finite(sample.get("ram_percent")),"disk_percent":_finite(sample.get("disk_percent"))})
+        cleaned.append({"at":at,"cpu_percent":_finite(sample.get("cpu_percent")),"ram_percent":_finite(sample.get("ram_percent")),"disk_percent":_finite(sample.get("disk_percent")),"disk_activity_percent":_finite(sample.get("disk_activity_percent")),"disk_latency_ms":_finite(sample.get("disk_latency_ms"))})
     cleaned.sort(key=lambda item:item["at"]);cutoff=current-timedelta(seconds=WINDOW_SECONDS[window])
     cleaned=[item for item in cleaned if cutoff<=item["at"]<=current]
     growth=list(memory_growth or [])[:25];events=[e for e in (os_events or [])[:MAX_OS_EVENTS] if _parse_time(e.get("at")) is not None]
@@ -174,6 +174,29 @@ def analyse_diagnostics(samples:list[dict[str,Any]],memory_growth:list[dict[str,
           "evidence":{"peak_percent":round(peak,1),"average_percent":round(average,1),"threshold_percent":threshold,
             "samples_above_threshold":len(above),"samples_considered":len(values),"first_observed":above[0][0].isoformat(),"last_observed":above[-1][0].isoformat()},
           "recommendation":recommendation,"confidence":"moderate" if sustained and len(values)>=6 else "limited"})
+    io_activity = [(item["at"], item["disk_activity_percent"]) for item in cleaned if item["disk_activity_percent"] is not None]
+    io_latency = [(item["at"], item["disk_latency_ms"]) for item in cleaned if item["disk_latency_ms"] is not None]
+    high_activity = [(at, value) for at, value in io_activity if value >= 90.0]
+    high_latency = [(at, value) for at, value in io_latency if value >= 50.0]
+    sustained_activity = bool(io_activity) and len(high_activity) >= 3 and len(high_activity) / len(io_activity) >= 0.25
+    sustained_latency = bool(io_latency) and len(high_latency) >= 3 and len(high_latency) / len(io_latency) >= 0.25
+    if sustained_activity or sustained_latency:
+        observed = high_activity + high_latency
+        pressure_times.extend(at for at, _ in observed)
+        peak_activity = max((value for _, value in io_activity), default=None)
+        average_activity = sum(value for _, value in io_activity) / len(io_activity) if io_activity else None
+        peak_latency = max((value for _, value in io_latency), default=None)
+        average_latency = sum(value for _, value in io_latency) / len(io_latency) if io_latency else None
+        findings.append({"id": "disk_io", "severity": "critical" if sustained_activity and (peak_activity or 0) >= 98 else "warning",
+          "title": "Sustained disk I/O pressure",
+          "summary": "Recorded disk activity or response latency remained elevated across multiple samples. This is a bottleneck lead, not proof that storage is the root cause.",
+          "evidence": {"peak_activity_percent": round(peak_activity, 1) if peak_activity is not None else None,
+            "average_activity_percent": round(average_activity, 1) if average_activity is not None else None,
+            "peak_latency_ms": round(peak_latency, 2) if peak_latency is not None else None,
+            "average_latency_ms": round(average_latency, 2) if average_latency is not None else None,
+            "activity_samples_above_90_percent": len(high_activity), "latency_samples_above_50_ms": len(high_latency)},
+          "recommendation": "Open Storage to compare per-drive activity, response latency, read/write rates, and top process I/O. Counter availability and latency semantics vary by operating system.",
+          "confidence": "moderate" if len(observed) >= 6 else "limited"})
     for item in growth:
         delta=_finite(item.get("growth_mb")) or 0
         if delta<MEMORY_GROWTH_MIN_MB:continue
@@ -204,4 +227,5 @@ def analyse_diagnostics(samples:list[dict[str,Any]],memory_growth:list[dict[str,
       "event_source_status":event_source_status,"summary":summary,"findings":findings,"memory_growth":growth,"correlated_events":correlations[:20],
       "limitations":["Resource thresholds indicate pressure, not root cause.","Temporal correlation does not establish causation.","Process memory increase alone is not proof of a memory leak; compare repeatable workloads.",
         "OS crash/event visibility depends on platform, log availability, optional dependencies, and permissions.",
+        "Disk activity and latency counters are platform-dependent; a missing counter is not evidence of healthy storage.",
         "Process-memory history is held in memory only and resets when the API process restarts."]}

@@ -21,7 +21,8 @@ WINDOW_SECONDS = {
 SAMPLE_FIELDS = (
     "timestamp", "cpu_percent", "ram_percent", "ram_used_gb", "ram_total_gb",
     "disk_percent", "disk_used_gb", "disk_total_gb", "network_sent_bytes",
-    "network_recv_bytes", "gpu_used_gb", "gpu_total_gb",
+    "network_recv_bytes", "gpu_used_gb", "gpu_total_gb", "disk_read_bytes_per_sec",
+    "disk_write_bytes_per_sec", "disk_read_iops", "disk_write_iops", "disk_activity_percent", "disk_latency_ms",
 )
 
 
@@ -80,6 +81,17 @@ class TelemetryStore:
                 "CREATE INDEX IF NOT EXISTS idx_telemetry_samples_epoch "
                 "ON telemetry_samples(sampled_epoch)"
             )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS timeline_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_epoch REAL NOT NULL,
+                    payload TEXT NOT NULL
+                )"""
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_timeline_events_epoch "
+                "ON timeline_events(created_epoch)"
+            )
             connection.commit()
         try:
             os.chmod(self.directory, 0o700)
@@ -95,6 +107,7 @@ class TelemetryStore:
         disk = data.get("disk") or {}
         network = data.get("network") or {}
         gpu = data.get("gpu") or {}
+        storage_io = data.get("storage_io") or {}
         timestamp = data.get("sampled_at")
         if not isinstance(timestamp, str):
             timestamp = datetime.fromtimestamp(now, timezone.utc).isoformat()
@@ -113,10 +126,18 @@ class TelemetryStore:
             "network_recv_bytes": int(_number(network.get("recv_bytes"), 0) or 0),
             "gpu_used_gb": _number(gpu.get("used_gb")),
             "gpu_total_gb": _number(gpu.get("total_gb")),
+            "disk_read_bytes_per_sec": _number(storage_io.get("read_bytes_per_sec")),
+            "disk_write_bytes_per_sec": _number(storage_io.get("write_bytes_per_sec")),
+            "disk_read_iops": _number(storage_io.get("read_iops")),
+            "disk_write_iops": _number(storage_io.get("write_iops")),
+            "disk_activity_percent": _number(storage_io.get("activity_percent")),
+            "disk_latency_ms": _number(storage_io.get("latency_ms")),
         }
         sample["cpu_percent"] = min(100.0, max(0.0, float(sample["cpu_percent"] or 0)))
         sample["ram_percent"] = min(100.0, max(0.0, float(sample["ram_percent"] or 0)))
         sample["disk_percent"] = min(100.0, max(0.0, float(sample["disk_percent"] or 0)))
+        if sample["disk_activity_percent"] is not None:
+            sample["disk_activity_percent"] = min(100.0, max(0.0, float(sample["disk_activity_percent"])))
         return sample
 
     def record(self, data: dict[str, Any]) -> bool:
@@ -169,3 +190,74 @@ class TelemetryStore:
         with self._lock, closing(self._connect()) as connection:
             row = connection.execute("SELECT COUNT(*) AS total FROM telemetry_samples").fetchone()
         return int(row["total"])
+
+    def clear_history(self) -> None:
+        """Delete all stored telemetry samples and timeline events."""
+        with self._lock, closing(self._connect()) as connection:
+            connection.execute("DELETE FROM telemetry_samples")
+            connection.execute("DELETE FROM timeline_events")
+            connection.commit()
+
+
+    def record_event(
+        self,
+        category: str,
+        title: str,
+        detail: str = "",
+        *,
+        severity: str = "info",
+        metadata: dict[str, Any] | None = None,
+        created_at: float | None = None,
+    ) -> dict[str, Any]:
+        """Persist a bounded event without storing command lines or executable paths."""
+        allowed_categories = {"resource", "process-start", "process-exit", "marker", "system"}
+        allowed_severities = {"info", "warning", "critical"}
+        category_value = category if category in allowed_categories else "system"
+        severity_value = severity if severity in allowed_severities else "info"
+        now = float(created_at if created_at is not None else time.time())
+        safe_metadata: dict[str, Any] = {}
+        for key, value in list((metadata or {}).items())[:12]:
+            if not isinstance(key, str) or len(key) > 40:
+                continue
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                safe_metadata[key] = str(value)[:160] if isinstance(value, str) else value
+        event = {
+            "timestamp": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+            "category": category_value,
+            "severity": severity_value,
+            "title": str(title)[:120],
+            "detail": str(detail)[:500],
+            "metadata": safe_metadata,
+        }
+        payload = json.dumps(event, separators=(",", ":"), allow_nan=False)
+        with self._lock, closing(self._connect()) as connection:
+            connection.execute(
+                "INSERT INTO timeline_events(created_epoch, payload) VALUES (?, ?)",
+                (now, payload),
+            )
+            connection.execute(
+                "DELETE FROM timeline_events WHERE created_epoch < ?",
+                (now - self.retention_seconds,),
+            )
+            connection.execute(
+                """DELETE FROM timeline_events WHERE id IN (
+                    SELECT id FROM timeline_events ORDER BY created_epoch DESC
+                    LIMIT -1 OFFSET 10000
+                )"""
+            )
+            connection.commit()
+        return event
+
+    def get_events(self, window: str = "24h", limit: int = 500) -> list[dict[str, Any]]:
+        if window not in WINDOW_SECONDS:
+            raise ValueError("Unsupported timeline window.")
+        bounded_limit = max(1, min(int(limit), 2000))
+        cutoff = time.time() - WINDOW_SECONDS[window]
+        with self._lock, closing(self._connect()) as connection:
+            rows = connection.execute(
+                """SELECT payload FROM timeline_events
+                   WHERE created_epoch >= ?
+                   ORDER BY created_epoch DESC LIMIT ?""",
+                (cutoff, bounded_limit),
+            ).fetchall()
+        return [json.loads(row["payload"]) for row in reversed(rows)]

@@ -9,6 +9,7 @@ def sample(cpu=22.5, ram=41.0):
         "disk": {"percent": 55, "used_gb": 200, "total_gb": 500},
         "network": {"sent_bytes": 1234, "recv_bytes": 5678},
         "gpu": {"status": "Unavailable", "used_gb": None, "total_gb": None},
+        "storage_io": {"read_bytes_per_sec": 1024, "write_bytes_per_sec": 2048, "read_iops": 4, "write_iops": 5, "activity_percent": 42, "latency_ms": 3.5},
         "system": {"hostname": "must-not-be-stored", "user": "also-must-not-be-stored"},
     }
 
@@ -55,3 +56,34 @@ def test_history_rejects_unknown_window(tmp_path):
         assert False, "Expected unsupported window to raise ValueError"
     except ValueError:
         pass
+
+
+
+def test_timeline_event_storage_is_bounded_and_sanitised(tmp_path):
+    store = TelemetryStore(tmp_path / "events")
+    event = store.record_event(
+        "marker", "Started IDE", "Build started",
+        metadata={"pid": 123, "path": "C:/private/app.exe", "bad": object()},
+    )
+    assert event["title"] == "Started IDE"
+    assert "path" in event["metadata"]
+    assert store.get_events("24h", 10)[0]["title"] == "Started IDE"
+    try:
+        store.get_events("forever", 10)
+        assert False, "Expected unsupported window to raise ValueError"
+    except ValueError:
+        pass
+
+
+
+def test_clear_history_deletes_samples_and_events(tmp_path):
+    store = TelemetryStore(tmp_path / "clear")
+    data = {
+        "cpu": {"percent": 10}, "ram": {"percent": 20}, "disk": {"percent": 30},
+        "network": {"sent_bytes": 0, "recv_bytes": 0}, "gpu": {}, "storage_io": {},
+    }
+    assert store.record(data)
+    store.record_event("marker", "test marker")
+    store.clear_history()
+    assert store.count() == 0
+    assert store.get_events("24h", 20) == []

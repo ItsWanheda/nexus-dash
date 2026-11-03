@@ -38,3 +38,22 @@ def test_process_memory_tracker_reports_repeated_growth_and_can_clear():
     growth=tracker.get_growth("1h",now=now)
     assert len(growth)==1 and growth[0]["pid"]==321 and growth[0]["growth_mb"]==80
     tracker.clear();assert tracker.get_growth("1h",now=now)==[]
+
+
+
+def test_analysis_detects_sustained_disk_io_pressure():
+    samples = [
+        {"timestamp": iso(4), "cpu_percent": 20, "ram_percent": 40, "disk_percent": 30,
+         "disk_activity_percent": 94, "disk_latency_ms": 62},
+        {"timestamp": iso(3), "cpu_percent": 25, "ram_percent": 41, "disk_percent": 30,
+         "disk_activity_percent": 96, "disk_latency_ms": 58},
+        {"timestamp": iso(2), "cpu_percent": 22, "ram_percent": 40, "disk_percent": 30,
+         "disk_activity_percent": 92, "disk_latency_ms": 55},
+        {"timestamp": iso(1), "cpu_percent": 21, "ram_percent": 39, "disk_percent": 30,
+         "disk_activity_percent": 40, "disk_latency_ms": 4},
+    ]
+    result = analyse_diagnostics(samples, window="1h")
+    finding = next(item for item in result["findings"] if item["id"] == "disk_io")
+    assert finding["severity"] == "warning"
+    assert finding["evidence"]["activity_samples_above_90_percent"] == 3
+    assert finding["evidence"]["peak_latency_ms"] == 62
