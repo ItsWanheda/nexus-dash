@@ -92,7 +92,7 @@ NEXUS-DASH 2.0.0 combines a dependency-light browser interface with a Python Fas
 | Local API | Python 3.10+, FastAPI, Uvicorn |
 | OS telemetry | psutil and optional platform/vendor providers |
 | Historical storage | SQLite on the local machine |
-| Optional GPU telemetry | NVIDIA NVML, supported Linux AMD SMI, Linux DRM/sysfs and Windows LibreHardwareMonitor |
+| Optional GPU telemetry | AMD ADLX on supported Windows drivers, NVIDIA NVML, supported Linux AMD SMI, Linux DRM/sysfs and Windows LibreHardwareMonitor |
 | Desktop packaging | PyWebView, PyInstaller and Inno Setup |
 | Tests and CI | pytest, FastAPI TestClient, GitHub Actions |
 
@@ -154,7 +154,7 @@ Then open <http://127.0.0.1:5500>.
 python -m pip install -r requirements-hardware.txt
 ```
 
-This installs optional NVIDIA NVML, Windows WMI and Linux AMD SMI bindings. GPU inventory is also read from native OS interfaces (Windows DirectX DXGI + WMI/device registry, Linux PCI sysfs and macOS system_profiler). On Windows, DXGI reports the adapter model, PCI/subsystem identity, revision and dedicated/shared memory capacity; Windows GPU Engine and AdapterMemory counters provide per-adapter utilisation and memory use where the graphics driver exposes them. Live sensor values remain dependent on each device's driver and supported sensor interfaces. Windows LibreHardwareMonitor can provide additional readings across supported GPU vendors; Linux DRM/sysfs exposes generic counters where the active driver publishes them. AMD SMI requires a compatible AMDGPU/ROCm stack.
+This installs optional NVIDIA NVML, Windows WMI, AMD ADLX on compatible 64-bit Windows systems, and Linux AMD SMI bindings. GPU inventory is also read from native OS interfaces (Windows DirectX DXGI + WMI/device registry, Linux PCI sysfs and macOS system_profiler). On Windows, DXGI reports the adapter model, PCI/subsystem identity, revision and dedicated/shared memory capacity; Windows GPU Engine and AdapterMemory counters provide per-adapter utilisation and memory use where the graphics driver exposes them. Live sensor values remain dependent on each device's driver and supported sensor interfaces. Windows LibreHardwareMonitor can provide additional readings across supported GPU vendors; Linux DRM/sysfs exposes generic counters where the active driver publishes them. AMD SMI requires a compatible AMDGPU/ROCm stack.
 
 ### SMART storage health
 

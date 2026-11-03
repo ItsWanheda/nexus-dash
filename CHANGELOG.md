@@ -4,6 +4,10 @@ All notable changes to NEXUS-DASH are recorded here. Unreleased changes are part
 
 ## [Unreleased]
 
+### Added — AMD ADLX telemetry
+- Integrated AMD's official `amd-adlx` Python binding as an optional Windows AMD provider for device identity, GPU usage, temperature/hotspot, power, core/VRAM clocks, fan percentage and VRAM usage.
+- Added optional ADLX native extension packaging to the Windows desktop build while keeping non-AMD and non-Windows installations independent of it.
+
 ### Added — Detailed Windows GPU hardware identity
 - Added native DirectX DXGI enumeration for exact adapter description, PCI vendor/device/subsystem IDs, revision, adapter LUID, and dedicated/shared memory capacity.
 - Added Windows GPU Engine and GPU AdapterMemory performance-counter collection, matched to the adapter by LUID.
