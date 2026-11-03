@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { id: 'storage', label: 'Storage', icon: '▧' },
   { id: 'flight-recorder', label: 'Flight Recorder', icon: '◷' },
   { id: 'diagnostics', label: 'Bottleneck Detective', icon: '⌁' },
+  { id: 'assistant', label: 'NEXUS Sentinel', icon: '✧' },
   { id: 'system', label: 'System Core', icon: '⌘' },
   { id: 'security', label: 'Security', icon: '⬡' },
   { id: 'terminal', label: 'Diagnostic Terminal', icon: '>_' },
@@ -179,6 +180,17 @@ function handleClick(event) {
   else if (action === 'hardware-refresh') loadHardware();
   else if (action === 'storage-refresh') { loadStorage(); loadStorageHistory(); }
   else if (action === 'export-diagnostic-report') exportDiagnosticReport();
+  else if (action === 'capture-incident') captureIncident();
+  else if (action === 'ask-sentinel-diagnostics') {
+    const symptom = document.getElementById('diagnostic-problem');
+    const detail = symptom && symptom.value.trim();
+    const summary = state.diagnostics && state.diagnostics.summary;
+    const question = 'Please investigate this problem using the latest NEXUS telemetry. User symptom: ' +
+      (detail || 'No extra symptom details provided.') + ' Current diagnostics summary: ' +
+      (summary || 'No diagnostic summary loaded yet.') +
+      ' Explain observed evidence, likely causes with confidence, missing evidence, and safe next steps. Do not claim an unsupported root cause.';
+    if (window.NexusAssistant) window.NexusAssistant.openWithQuestion(question);
+  } else if (action === 'view-incident') showIncidentCapture(Number(target.dataset.incidentId));
   else if (action === 'clear-logs') {
     state.logs = [];
     renderLogs();
@@ -247,6 +259,9 @@ function renderContent() {
     renderFlightRecorder();
   } else if (state.tab === 'diagnostics') {
     renderDiagnostics();
+  } else if (state.tab === 'assistant') {
+    if (window.NexusAssistant) window.NexusAssistant.render(main);
+    else main.innerHTML = '<section class="panel"><p class="empty-state">NEXUS Sentinel assistant module is unavailable.</p></section>';
   } else if (state.tab === 'processes') {
     main.innerHTML = '<section class="page-intro"><div><div class="eyebrow">PROCESS CONTROL / LOCAL USER</div><h2>Process manager</h2><p>Inspect process snapshots. Termination is restricted to processes owned by your current OS user; protected processes cannot be terminated.</p></div><button class="primary-button" type="button" data-action="process-refresh">↻ Refresh</button></section>' +
       '<div class="view-switch"><button type="button" class="secondary-button" data-action="process-list-view" aria-pressed="true">List view</button><button type="button" class="secondary-button" data-action="process-tree-view" aria-pressed="false">Process tree</button></div>' +
@@ -286,6 +301,7 @@ function renderContent() {
   }
   if (window.NexusEnhancements) window.NexusEnhancements.afterRender();
   if (window.NexusDeepTelemetry) window.NexusDeepTelemetry.afterRender();
+  if (window.NexusAssistant) window.NexusAssistant.afterRender();
 }
 function updateDashboard() {
   const data = state.stats;
