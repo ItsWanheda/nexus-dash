@@ -6,14 +6,14 @@ The Flight Recorder stores a rolling window of real resource telemetry on the ma
 
 The database contains a UTC timestamp, CPU utilisation, RAM utilisation/capacity, system-volume utilisation/capacity, network byte counters, and optional GPU-memory values. Unsupported GPU values remain null.
 
-The recorder deliberately does not store hostname, OS username, process names, executable paths, command lines, open files, network destinations, or file contents. The process tree is fetched as a live bounded snapshot and is not added to the historical database.
+The aggregate system telemetry table deliberately excludes hostname, OS username, process names, executable paths and command lines. Separate feature tables now exist: process performance history stores process name, PID, creation time and numeric CPU/RAM/thread/disk I/O metrics; network-quality history stores explicitly configured target labels/ports and DNS/TCP measurements; process-network history stores process name/PID and measured byte rates when its provider is enabled. Incident captures bundle recent local evidence from these sources. None stores executable paths, command lines, usernames, socket IP addresses, MAC addresses or packet contents.
 
 ## Sampling and bounds
 
 - The API background recorder samples while the API process is running, even when the browser UI is closed.
 - Persistent writes are throttled to approximately one sample every five seconds.
 - Old samples are deleted after 24 hours.
-- The database is capped at 20,000 samples; the oldest samples are deleted first when the cap is reached.
+- Aggregate telemetry is capped at 20,000 samples. Network-interface, process, quality and incident tables have independent row bounds and retention handling.
 - History queries are limited to five supported windows and 2,000 returned samples.
 - Current values are not backfilled. History begins when this version of NEXUS is running.
 
@@ -26,7 +26,7 @@ Default location:
 
 Set NEXUS_DATA_DIR before starting python server.py to choose a different directory. NEXUS attempts to restrict directory and database file permissions on platforms that support POSIX mode bits.
 
-To erase stored telemetry, stop the API first, then remove the database and its companion files (telemetry.sqlite3, telemetry.sqlite3-wal, and telemetry.sqlite3-shm) from that directory. Do not delete the database while the API is running.
+To erase stored telemetry, use Settings → Clear History (which clears aggregate telemetry, interface samples, process history, network-quality history, per-process network samples, timeline events and incident captures). Alternatively stop the API first, then remove the database and companion files (telemetry.sqlite3, telemetry.sqlite3-wal and telemetry.sqlite3-shm). Do not delete the database while the API is running.
 
 ## API examples
 
@@ -78,3 +78,14 @@ The Storage view obtains a fresh live snapshot and replays historical aggregate 
 The recorder and timeline accept 7-day and 30-day windows, subject to the configured retention policy and bounded SQLite sample cap. The Advanced Analytics view calculates average, minimum, maximum, p50, p95, threshold frequency, utilisation distributions, UTC-hour profiles, bucketed trends, incident frequency and equal-length previous-window comparisons. Missing intervals are not interpolated.
 
 Per-interface network counters are stored in a separate bounded table. Each interface is sampled independently and latest history is returned chronologically so rates are calculated correctly. The analytics endpoint can inspect up to 20,000 retained samples per interface. IP/MAC addresses and socket destinations are never stored.
+
+
+## Persistent process history, network quality and incident evidence
+
+The process sampler stores up to 50 process records per sampling cycle when enabled. A record is keyed by PID plus process creation time and contains process name, CPU percentage, RSS memory, thread count, cumulative disk read/write counters and rates derived from successive counters. Exclusions apply. This table is separate from aggregate resource telemetry and is not the complete list of all processes.
+
+Continuous network-quality checks are opt-in and use up to three user-configured host/port targets. Target labels/ports and DNS/TCP timing results are stored locally. The sampler runs no more than once per minute while background recording is active.
+
+Per-process network history is opt-in and depends on a supported provider. On Linux, NetHogs is used when installed and accessible. On Windows/macOS, this release reports that a per-process byte-accounting provider is not supported; it does not treat socket ownership as network byte rate.
+
+Incident evidence is saved separately in a bounded table. The local store keeps at most 250 captures, with each evidence payload capped at 2 MB. Manual capture and automatic trigger capture are available. Clear History deletes all of these tables along with aggregate resource history.

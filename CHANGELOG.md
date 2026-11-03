@@ -4,6 +4,17 @@ All notable changes to NEXUS-DASH are recorded here. Unreleased changes are part
 
 ## [Unreleased]
 
+### Added — Diagnostic Terminal, Cross-Vendor Hardware, Process/Network Intelligence, Forensics and NEXUS Sentinel
+- Replaced the status-only diagnostic terminal with an explicit CMD-like allowlist for CPU/RAM, drives, process listing/inspection, network interfaces/sockets, DNS, TCP handshake and bounded ping diagnostics. Shell operators, arbitrary executables, command chaining and destructive commands remain unsupported.
+- Added AMD, NVIDIA and Intel GPU inventory through Windows WMI/Linux PCI data; added optional AMD SMI metrics on supported Linux AMDGPU/ROCm systems and Linux PCI ID name resolution for older adapters.
+- Added SMBIOS/DMI or Windows WMI system, baseboard and BIOS identity. Added Windows LibreHardwareMonitor WMI sensors and Linux hwmon/psutil fan RPM and temperature discovery. Fan monitoring is read-only.
+- Added durable per-process CPU/RSS/thread/disk I/O history to SQLite, keyed by PID and process creation time, with bounded sampling and retention.
+- Added optional Linux NetHogs per-process upload/download byte-rate attribution. Unsupported Windows/macOS accounting providers report capability limitations rather than fabricated bandwidth numbers.
+- Added opt-in continuous DNS/TCP quality checks for up to three configured targets, with persistent latency, latency-swing and TCP failure history plus repeated-degradation events.
+- Added rolling median/MAD adaptive anomaly detection, bounded manual/automatic incident captures, incident evidence viewing and JSON export.
+- Added NEXUS Sentinel, a local Ollama assistant using installed models only (default qwen3.5:4b), with optional telemetry context and a deterministic offline diagnostic guide. No cloud fallback, model auto-download or command execution.
+- Updated hardware, process, network and diagnostics UI, settings, API docs, CI coverage and troubleshooting guidance.
+
 ### Added — Network Intelligence and Advanced Analytics
 - Added per-interface upload/download and packet rates, link state, speed/MTU/duplex, error/drop deltas, local interface history and link-transition events.
 - Added bounded live TCP/UDP socket inventory with process attribution and opt-in IP address reveal; socket rows and destinations are not persisted.
