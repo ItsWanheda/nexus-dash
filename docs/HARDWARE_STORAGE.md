@@ -37,3 +37,13 @@ A missing counter or sensor is not evidence that the hardware is healthy. Activi
 ## Privacy and local security
 
 All new routes are protected by the existing loopback, trusted-host, and browser-origin checks. The API remains bound to `127.0.0.1`. Hardware and storage snapshots are not sent to a remote service. Persistent history includes only aggregate numeric resource/disk-I/O metrics and timestamps.
+
+
+## Network Intelligence
+
+- GET /api/network provides per-interface byte/packet counters, upload/download rates, link state, speed, MTU, duplex, errors and drop deltas. Initial rates warm up until two readings are available.
+- GET /api/network/history?window=24h&interface=Ethernet returns bounded local interface history. The store retains counters and link metadata only; it does not store IP or MAC addresses. Rate calculations are chronological and reset-aware.
+- GET /api/network/connections?limit=150&include_addresses=false returns a bounded live socket view with protocol, state, PID/process attribution and ports. IP addresses are hidden by default; explicitly reveal them only for the current view. OS permissions may limit the socket table.
+- GET /api/network/diagnostics?host=example.com&port=443&attempts=3 performs a bounded DNS lookup and TCP handshake probe. It reports DNS time, connect latency, jitter and failed attempts. No HTTP request or application payload is sent, and the host is not saved in history.
+
+No destination IP, DNS destination, MAC address, packet content, or per-process network traffic volume is persisted. Socket attribution is a live process-name association, not a historical per-process byte counter.

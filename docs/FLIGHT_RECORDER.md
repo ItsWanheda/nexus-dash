@@ -71,3 +71,10 @@ Bottleneck Detective analyses recorded samples and correlates resource-pressure 
 The Flight Recorder also records aggregate disk read/write throughput, read/write IOPS, and the maximum reported activity/latency values when the operating system exposes those counters. The history remains bounded by the same 24-hour and 20,000-sample limits. Missing platform counters are stored as null and are not drawn as zero. Per-process I/O, process names, PIDs, drive mount paths, SMART output, and device identifiers are not written to SQLite.
 
 The Storage view obtains a fresh live snapshot and replays historical aggregate rates from the Flight Recorder. Counter rates require at least two samples; the first reading is marked as warming up.
+
+
+## Extended historical windows and analytics
+
+The recorder and timeline accept 7-day and 30-day windows, subject to the configured retention policy and bounded SQLite sample cap. The Advanced Analytics view calculates average, minimum, maximum, p50, p95, threshold frequency, utilisation distributions, UTC-hour profiles, bucketed trends, incident frequency and equal-length previous-window comparisons. Missing intervals are not interpolated.
+
+Per-interface network counters are stored in a separate bounded table. Each interface is sampled independently and latest history is returned chronologically so rates are calculated correctly. The analytics endpoint can inspect up to 20,000 retained samples per interface. IP/MAC addresses and socket destinations are never stored.

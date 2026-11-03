@@ -4,6 +4,13 @@ All notable changes to NEXUS-DASH are recorded here. Unreleased changes are part
 
 ## [Unreleased]
 
+### Added — Network Intelligence and Advanced Analytics
+- Added per-interface upload/download and packet rates, link state, speed/MTU/duplex, error/drop deltas, local interface history and link-transition events.
+- Added bounded live TCP/UDP socket inventory with process attribution and opt-in IP address reveal; socket rows and destinations are not persisted.
+- Added manual DNS/TCP connectivity diagnostics with resolver latency, handshake latency, jitter and bounded attempts. No application payload is sent.
+- Added 7-day and 30-day analytics windows, average/min/max/p50/p95 statistics, utilisation distributions, UTC-hour profiles, trend buckets, incident frequency and equal-length previous-period comparisons.
+- Added independent CPU, memory, storage and network evidence scorecards. Thermal history is explicitly marked not recorded; no arbitrary combined health score is produced.
+
 ### Added — Process Intelligence, Investigation Timeline, Alert Center, Custom Workspace, Settings, and Windows Desktop
 - Added identity-checked process inspection, CPU/RAM history and observed memory growth, two-process comparison, threads, uptime, disk I/O, executable metadata, and OS-dependent handles/file descriptors.
 - Added a local SQLite investigation timeline with resource-pressure and process lifecycle events plus user-authored incident markers.

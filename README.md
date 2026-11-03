@@ -141,6 +141,11 @@ This adds NVIDIA NVML bindings and the optional Windows WMI provider. SMART heal
 | GET | /api/stats | Current CPU, RAM, disk, network, GPU, storage counters, and host snapshot |
 | GET | /api/hardware | Detailed CPU/core, GPU, memory, motherboard, and battery telemetry |
 | GET | /api/storage | Per-drive capacity and I/O, top process activity, and optional SMART health |
+| GET | /api/network | Per-interface counters, throughput, link state, errors and drops |
+| GET | /api/network/connections?limit=150&include_addresses=false | Bounded live TCP/UDP socket inventory |
+| GET | /api/network/history?window=24h | Locally stored interface counter history |
+| GET | /api/network/diagnostics?host=example.com&port=443 | User-triggered DNS and TCP handshake diagnostics |
+| GET | /api/analytics?window=24h&compare_previous=true | Historical statistics, trends, distributions and scorecards |
 | GET | /api/processes?limit=100 | Filterable process snapshot (limit 1–200) |
 | GET | /api/processes/{pid}?create_time=... | Identity-checked detailed process inspection |
 | GET | /api/process-history?pid=...&create_time=...&window=30m | Process CPU/RAM history |
@@ -182,8 +187,9 @@ To clear history, stop NEXUS and remove the telemetry.sqlite3, telemetry.sqlite3
     node --check src/static/hardware.js
     node --check src/static/storage.js
     node --check src/static/nexus-enhancements.js
+    node --check src/static/network-analytics.js
     node --check src/static/app.js
-    python -m compileall -q server.py telemetry_store.py diagnostics.py hardware.py storage_metrics.py process_intelligence.py settings_store.py desktop_app.py tests
+    python -m compileall -q server.py telemetry_store.py diagnostics.py hardware.py storage_metrics.py process_intelligence.py settings_store.py desktop_app.py network_metrics.py analytics.py tests
 
 CI validates Python 3.10–3.13, frontend JavaScript syntax, Python compilation, and the test suite. Local manual checks across Windows, Linux, and macOS are still recommended for process visibility and permission-dependent behaviour.
 
@@ -200,6 +206,8 @@ CI validates Python 3.10–3.13, frontend JavaScript syntax, Python compilation,
     ├── diagnostics.py
     ├── hardware.py
     ├── process_intelligence.py
+    ├── network_metrics.py
+    ├── analytics.py
     ├── settings_store.py
     ├── desktop_app.py
     ├── NEXUS-DASH.spec
