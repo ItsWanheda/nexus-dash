@@ -5,10 +5,12 @@ const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: '◈' },
   { id: 'processes', label: 'Processes', icon: '▤' },
   { id: 'analytics', label: 'Analytics', icon: '◉' },
+  { id: 'network', label: 'Network Intelligence', icon: '↔' },
   { id: 'hardware', label: 'Hardware', icon: '▦' },
   { id: 'storage', label: 'Storage', icon: '▧' },
   { id: 'flight-recorder', label: 'Flight Recorder', icon: '◷' },
   { id: 'diagnostics', label: 'Bottleneck Detective', icon: '⌁' },
+  { id: 'assistant', label: 'NEXUS Sentinel', icon: '✧' },
   { id: 'system', label: 'System Core', icon: '⌘' },
   { id: 'security', label: 'Security', icon: '⬡' },
   { id: 'terminal', label: 'Diagnostic Terminal', icon: '>_' },
@@ -138,12 +140,18 @@ function bindEvents() {
     if (target && target.id === 'storage-history-window') { state.storageWindow = target.value; loadStorageHistory(); }
     if (target && ['alert-cpu', 'alert-ram', 'alert-disk', 'alert-consecutive'].includes(target.id)) saveRecorderSettings();
     if (window.NexusEnhancements) window.NexusEnhancements.handleChange(target);
+    if (window.NexusAssistant) window.NexusAssistant.handleChange(target);
+    if (window.NexusDeepTelemetry) window.NexusDeepTelemetry.handleChange(target);
   });
   app.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closeMenu();
     if (event.key === 'Enter' && event.target && event.target.id === 'terminal-input') {
       event.preventDefault();
       runTerminal();
+    }
+    if (event.key === 'Enter' && event.ctrlKey && event.target && event.target.id === 'sentinel-input') {
+      event.preventDefault();
+      if (window.NexusAssistant) window.NexusAssistant.handleAction('sentinel-send');
     }
   });
 }
@@ -177,11 +185,25 @@ function handleClick(event) {
   else if (action === 'hardware-refresh') loadHardware();
   else if (action === 'storage-refresh') { loadStorage(); loadStorageHistory(); }
   else if (action === 'export-diagnostic-report') exportDiagnosticReport();
+  else if (action === 'capture-incident') captureIncident();
+  else if (action === 'ask-sentinel-diagnostics') {
+    const symptom = document.getElementById('diagnostic-problem');
+    const detail = symptom && symptom.value.trim();
+    const summary = state.diagnostics && state.diagnostics.summary;
+    const question = 'Please investigate this problem using the latest NEXUS telemetry. User symptom: ' +
+      (detail || 'No extra symptom details provided.') + ' Current diagnostics summary: ' +
+      (summary || 'No diagnostic summary loaded yet.') +
+      ' Explain observed evidence, likely causes with confidence, missing evidence, and safe next steps. Do not claim an unsupported root cause.';
+    if (window.NexusAssistant) window.NexusAssistant.openWithQuestion(question);
+  } else if (action === 'view-incident') showIncidentCapture(Number(target.dataset.incidentId));
+  else if (action === 'export-incident') exportIncident(Number(target.dataset.incidentId));
   else if (action === 'clear-logs') {
     state.logs = [];
     renderLogs();
   } else if (action === 'terminate-process') terminateProcess(Number(target.getAttribute('data-pid')), Number(target.getAttribute('data-create-time')));
   else if (window.NexusEnhancements && window.NexusEnhancements.handleAction(action, target)) return;
+  else if (window.NexusDeepTelemetry && window.NexusDeepTelemetry.handleAction(action, target)) return;
+  else if (window.NexusAssistant && window.NexusAssistant.handleAction(action, target)) return;
 }
 function closeMenu() {
   const sidebar = document.getElementById('sidebar');
@@ -231,13 +253,11 @@ function renderContent() {
       '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">CONNECTION</span><h3>Local API</h3></div><span id="api-state" class="state-chip">CHECKING</span></div><p id="connection-note" class="muted">Connecting to 127.0.0.1:8000…</p><div class="divider"></div><div class="mini-facts"><span>Transport</span><strong>HTTP / loopback</strong><span>Refresh interval</span><strong>2 seconds</strong></div></section></div>';
     updateDashboard();
   } else if (state.tab === 'analytics') {
-    main.innerHTML = '<section class="page-intro"><div><div class="eyebrow">TELEMETRY / TRENDS</div><h2>Analytics</h2><p>Charts use samples collected during this browser session; no historical dataset is fabricated.</p></div></section>' +
-      '<div class="metrics-grid compact-metrics">' + metricCard('CURRENT CPU','analytics-cpu','--%','analytics-cpu-meta','CPU load','cpu') +
-      metricCard('CURRENT RAM','analytics-ram','--%','analytics-ram-meta','RAM utilisation','ram') +
-      metricCard('SAMPLES','analytics-count','0','analytics-count-meta','In this session','samples') +
-      metricCard('SAMPLE WINDOW','analytics-window','—','analytics-window-meta','Approximate duration','time') +
-      '</div><section class="panel"><div class="panel-heading"><div><span class="eyebrow">RECENT HISTORY</span><h3>CPU and memory</h3></div><span class="panel-tag">SESSION ONLY</span></div><div id="analytics-chart" class="history-chart"></div><div class="chart-legend"><span><i class="legend-dot cpu-legend"></i>CPU</span><span><i class="legend-dot ram-legend"></i>RAM</span></div></section>';
-    updateAnalytics();
+    if (window.NexusDeepTelemetry) window.NexusDeepTelemetry.renderAnalytics(main);
+    else main.innerHTML = '<section class="panel"><p class="empty-state">Historical analytics module is unavailable.</p></section>';
+  } else if (state.tab === 'network') {
+    if (window.NexusDeepTelemetry) window.NexusDeepTelemetry.renderNetwork(main);
+    else main.innerHTML = '<section class="panel"><p class="empty-state">Network telemetry module is unavailable.</p></section>';
   } else if (state.tab === 'hardware') {
     renderHardware();
   } else if (state.tab === 'storage') {
@@ -246,6 +266,9 @@ function renderContent() {
     renderFlightRecorder();
   } else if (state.tab === 'diagnostics') {
     renderDiagnostics();
+  } else if (state.tab === 'assistant') {
+    if (window.NexusAssistant) window.NexusAssistant.render(main);
+    else main.innerHTML = '<section class="panel"><p class="empty-state">NEXUS Sentinel assistant module is unavailable.</p></section>';
   } else if (state.tab === 'processes') {
     main.innerHTML = '<section class="page-intro"><div><div class="eyebrow">PROCESS CONTROL / LOCAL USER</div><h2>Process manager</h2><p>Inspect process snapshots. Termination is restricted to processes owned by your current OS user; protected processes cannot be terminated.</p></div><button class="primary-button" type="button" data-action="process-refresh">↻ Refresh</button></section>' +
       '<div class="view-switch"><button type="button" class="secondary-button" data-action="process-list-view" aria-pressed="true">List view</button><button type="button" class="secondary-button" data-action="process-tree-view" aria-pressed="false">Process tree</button></div>' +
@@ -273,10 +296,10 @@ function renderContent() {
       securityItem('04','Cross-origin guard','Browser origins are allowlisted. Credentialed CORS is disabled.') +
       '</div><p class="warning-note"><strong>Important:</strong> Loopback software still has local-user privileges. Keep the API on localhost and never expose port 8000 through a reverse proxy or port forward.</p>';
   } else if (state.tab === 'terminal') {
-    main.innerHTML = '<section class="page-intro"><div><div class="eyebrow">DIAGNOSTICS / ALLOWLISTED COMMANDS</div><h2>Diagnostic terminal</h2><p>Read-only diagnostic commands only. This is not a general-purpose shell.</p></div><span class="panel-tag">NO SHELL EXECUTION</span></section>' +
+    main.innerHTML = '<section class="page-intro"><div><div class="eyebrow">DIAGNOSTICS / SAFE COMMAND WORKSPACE</div><h2>Diagnostic terminal</h2><p>Useful CMD-style diagnostics for processes, CPU, memory, drives, network, DNS, TCP and hardware. Commands are individually implemented; this is not an unrestricted shell.</p></div><span class="panel-tag">ALLOWLISTED LOCAL COMMANDS</span></section>' +
       '<section class="terminal-panel"><div class="terminal-topline"><span class="terminal-lights"><i></i><i></i><i></i></span><span>NEXUS_DIAGNOSTICS / LOCAL</span><button type="button" class="text-button" data-action="terminal-clear">Clear</button></div>' +
-      '<div id="terminal-output" class="terminal-output" role="log" aria-live="polite"><p class="terminal-muted">NEXUS diagnostic console · v1.2</p><p class="terminal-muted">Type <strong>help</strong> to list safe, read-only commands.</p></div>' +
-      '<div class="terminal-form"><label for="terminal-input" class="terminal-prompt">nexus<span>›</span></label><input id="terminal-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" placeholder="help"><button type="button" class="primary-button" data-action="terminal-send">Run</button></div><p class="terminal-footnote">Commands run as the current local user. Never paste secrets into diagnostic output.</p></section>';
+      '<div id="terminal-output" class="terminal-output" role="log" aria-live="polite"><p class="terminal-muted">NEXUS diagnostic console · v2.1</p><p class="terminal-muted">Try <strong>help</strong>, <strong>processes 15 sort=memory</strong>, <strong>connections</strong> or <strong>tcp example.com 443</strong>.</p></div>' +
+      '<div class="terminal-form"><label for="terminal-input" class="terminal-prompt">nexus<span>›</span></label><input id="terminal-input" type="text" maxlength="256" autocomplete="off" spellcheck="false" placeholder="help"><button type="button" class="primary-button" data-action="terminal-send">Run</button></div><p class="terminal-footnote">Commands run as the current local user. Shell operators, command chaining, destructive commands and arbitrary executable names are not supported.</p></section>';
   } else if (state.tab === 'timeline' || state.tab === 'alerts' || state.tab === 'settings') {
     if (window.NexusEnhancements) window.NexusEnhancements.renderTab(state.tab, main);
   } else if (state.tab === 'logs') {
@@ -284,6 +307,8 @@ function renderContent() {
     renderLogs();
   }
   if (window.NexusEnhancements) window.NexusEnhancements.afterRender();
+  if (window.NexusDeepTelemetry) window.NexusDeepTelemetry.afterRender();
+  if (window.NexusAssistant) window.NexusAssistant.afterRender();
 }
 function updateDashboard() {
   const data = state.stats;
@@ -423,7 +448,7 @@ function startPolling() {
   state.hardwareTimer = null;
   state.storageTimer = null;
   state.storageHistoryTimer = null;
-  if (['dashboard', 'analytics', 'system', 'flight-recorder'].includes(state.tab)) {
+  if (['dashboard', 'system', 'flight-recorder'].includes(state.tab)) {
     fetchStats();
     state.statsTimer = window.setInterval(fetchStats, POLL_INTERVAL_MS);
   }
@@ -528,7 +553,8 @@ async function runTerminal() {
   finally { if (button) button.disabled = false; input.focus(); }
 }
 async function refreshCurrentView() {
-  if (['dashboard', 'analytics', 'system', 'flight-recorder'].includes(state.tab)) await fetchStats();
+  if (['dashboard', 'system', 'flight-recorder'].includes(state.tab)) await fetchStats();
+  if (window.NexusDeepTelemetry && ['network', 'analytics'].includes(state.tab)) await window.NexusDeepTelemetry.refreshCurrentView();
   if (state.tab === 'flight-recorder') await loadRecorderHistory();
   if (state.tab === 'diagnostics') await loadDiagnostics();
   if (state.tab === 'hardware') await loadHardware();

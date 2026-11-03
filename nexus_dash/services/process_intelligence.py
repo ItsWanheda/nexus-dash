@@ -104,8 +104,18 @@ class ProcessIntelligence:
             for key in list(self._history):
                 if key not in active_keys and len(self._history) > self.max_processes * 2:
                     self._history.pop(key, None)
+            persistent_samples = []
+            for _, process, record in selected:
+                identity = observed.get(int(process.pid))
+                if identity is None:
+                    continue
+                persistent_samples.append({
+                    "pid": int(process.pid), "create_time": float(identity[0]),
+                    "process_name": str(identity[1])[:120], **record,
+                })
             return {"started": started[:50], "exited": exited[:50],
-                    "tracked_processes": len(active_keys), "sampled_at": datetime.fromtimestamp(now, timezone.utc).isoformat()}
+                    "tracked_processes": len(active_keys), "samples": persistent_samples,
+                    "sampled_at": datetime.fromtimestamp(now, timezone.utc).isoformat()}
 
     def inspect(self, pid: int, expected_create_time: float) -> dict[str, Any]:
         try:

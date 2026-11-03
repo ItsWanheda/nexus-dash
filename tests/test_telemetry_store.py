@@ -1,4 +1,4 @@
-from telemetry_store import TelemetryStore
+from nexus_dash.services.telemetry_store import TelemetryStore
 
 
 def sample(cpu=22.5, ram=41.0):
@@ -87,3 +87,94 @@ def test_clear_history_deletes_samples_and_events(tmp_path):
     store.clear_history()
     assert store.count() == 0
     assert store.get_events("24h", 20) == []
+
+
+
+def test_network_interface_history_stores_only_counters_and_link_metadata(tmp_path):
+    store = TelemetryStore(tmp_path / "network-history", sample_interval_seconds=0)
+    interfaces = [{
+        "name": "Ethernet", "is_up": True, "is_loopback": False, "speed_mbps": 1000, "mtu": 1500,
+        "duplex": "full", "bytes_sent": 1000, "bytes_recv": 2000, "packets_sent": 10,
+        "packets_recv": 20, "errors_in": 0, "errors_out": 0, "drops_in": 0, "drops_out": 0,
+        "local_address": "192.0.2.10", "mac": "aa:bb:cc:dd:ee:ff",
+    }]
+    assert store.record_network_interfaces(interfaces)
+    rows = store.get_network_history("24h", interface="Ethernet", limit_per_interface=20)
+    assert len(rows) == 1
+    assert rows[0]["interface_name"] == "Ethernet"
+    assert "local_address" not in rows[0]
+    assert "mac" not in rows[0]
+
+
+def test_analytics_history_supports_30_day_window_and_previous_period(tmp_path):
+    store = TelemetryStore(tmp_path / "analytics-history", sample_interval_seconds=0)
+    data = {
+        "cpu": {"percent": 15}, "ram": {"percent": 20, "used_gb": 2, "total_gb": 8},
+        "disk": {"percent": 30, "used_gb": 30, "total_gb": 100},
+        "network": {"sent_bytes": 100, "recv_bytes": 200}, "gpu": {}, "storage_io": {},
+    }
+    store.record(data)
+    report = store.get_analytics_history("30d", compare_previous=True)
+    assert report["window"] == "30d"
+    assert len(report["current"]) == 1
+    assert report["previous"] == []
+
+
+
+def test_network_history_returns_latest_points_in_chronological_order(tmp_path):
+    import time
+    store = TelemetryStore(tmp_path / "network-order", sample_interval_seconds=0)
+    now = time.time()
+    for offset, sent in ((-5, 100), (-4, 200), (-3, 500)):
+        store.record_network_interfaces([{
+            "name": "eth0", "bytes_sent": sent, "bytes_recv": sent * 2,
+            "packets_sent": sent // 10, "packets_recv": sent // 5,
+            "errors_in": 0, "errors_out": 0, "drops_in": 0, "drops_out": 0,
+            "is_up": True,
+        }], sampled_epoch=now + offset)
+    rows = store.get_network_history("24h", interface="eth0", limit_per_interface=2)
+    assert len(rows) == 2
+    assert rows[0]["bytes_sent"] == 200
+    assert rows[1]["bytes_sent"] == 500
+    assert rows[0]["sampled_epoch"] < rows[1]["sampled_epoch"]
+
+
+from nexus_dash.services.telemetry_store import TelemetryStore
+import time
+
+
+def test_process_history_persists_identity_io_rates_and_survives_process_exit(tmp_path):
+    store = TelemetryStore(tmp_path / "process-history", sample_interval_seconds=0)
+    created = 1000.0
+    first_epoch = time.time() - 2
+    second_epoch = first_epoch + 1
+    store.record_process_samples([
+        {"pid": 42, "create_time": created, "process_name": "worker.exe",
+         "epoch": first_epoch, "cpu_percent": 10, "rss_mb": 100, "threads": 3,
+         "read_bytes": 1000, "write_bytes": 2000}
+    ])
+    store.record_process_samples([
+        {"pid": 42, "create_time": created, "process_name": "worker.exe",
+         "epoch": second_epoch, "cpu_percent": 20, "rss_mb": 120, "threads": 4,
+         "read_bytes": 3000, "write_bytes": 5000}
+    ])
+    history = store.get_process_history(42, created, 3600)
+    assert len(history) == 2
+    assert history[1]["read_bytes_per_sec"] == 2000
+    assert history[1]["write_bytes_per_sec"] == 3000
+    assert store.get_process_history(42, created + 50, 3600) == []
+
+
+def test_network_quality_history_and_incident_capture_are_bounded(tmp_path):
+    store = TelemetryStore(tmp_path / "forensics")
+    assert store.record_network_quality({
+        "host_label": "example.test", "port": 443, "status": "connected",
+        "dns_latency_ms": 12, "tcp_latency_ms": 22, "jitter_ms": 0,
+        "packet_loss_percent": 0, "success_count": 1, "failure_count": 0,
+    })
+    assert store.get_network_quality("24h")[0]["host_label"] == "example.test"
+    item = store.create_incident_capture("CPU spike", "Short summary", "warning", "test",
+                                         {"samples": [{"cpu_percent": 99}]})
+    assert item["id"] > 0
+    full = store.get_incident(item["id"])
+    assert full["evidence"]["samples"][0]["cpu_percent"] == 99

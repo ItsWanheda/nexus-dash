@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from server import app
+from nexus_dash.api.server import app
 
 client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 54321))
 
@@ -35,6 +35,9 @@ def test_terminal_help_only_describes_diagnostics():
     assert response.status_code == 200
     assert "uptime" in response.json()["stdout"]
     assert "does not execute arbitrary shell" in response.json()["stdout"]
+    assert "processes [limit]" in response.json()["stdout"]
+    assert "dns <hostname>" in response.json()["stdout"]
+    assert "shell" in response.json()["stdout"].lower()
 
 
 def test_terminal_rejects_arbitrary_shell_command():
@@ -48,7 +51,7 @@ def test_terminal_rejects_shell_operators():
 
 
 def test_terminal_rejects_oversized_input():
-    assert client.post("/api/terminal", json={"command": "x" * 121}).status_code == 422
+    assert client.post("/api/terminal", json={"command": "x" * 257}).status_code == 422
 
 
 def test_unapproved_browser_origin_is_rejected():
@@ -203,7 +206,7 @@ def test_desktop_module_imports_without_optional_gui_dependencies():
 
 
 def test_settings_retention_downsamples_within_sample_cap(tmp_path):
-    from settings_store import SettingsStore
+    from nexus_dash.services.settings_store import SettingsStore
     saved = SettingsStore(tmp_path).update({"sampling_interval_seconds": 5, "retention_days": 30})
     assert saved["effective_sampling_interval_seconds"] >= 130
     assert "20,000 samples" in saved["retention_note"]
@@ -212,3 +215,68 @@ def test_settings_retention_downsamples_within_sample_cap(tmp_path):
 def test_health_exposes_desktop_runtime_as_boolean():
     response = client.get("/api/health")
     assert isinstance(response.json()["desktop_runtime"], bool)
+
+
+
+def test_network_and_analytics_endpoints_have_bounded_contracts(monkeypatch):
+    import nexus_dash.api.server as server
+    from nexus_dash.services.network_metrics import NetworkSampler
+    monkeypatch.setattr(server, "NETWORK_SAMPLER", NetworkSampler())
+    network = client.get("/api/network")
+    assert network.status_code == 200
+    assert {"interfaces", "capabilities", "status"} <= network.json().keys()
+    assert network.json()["capabilities"]["ip_addresses_collected"] is False
+    connections = client.get("/api/network/connections?limit=5")
+    assert connections.status_code == 200
+    assert len(connections.json()["connections"]) <= 5
+    assert connections.json()["addresses_visible"] is False
+    assert client.get("/api/network/diagnostics?host=https://example.com").status_code == 400
+    analytics = client.get("/api/analytics?window=24h&compare_previous=true")
+    assert analytics.status_code == 200
+    assert {"metrics", "trend", "scorecards", "comparison", "incidents", "limitations"} <= analytics.json().keys()
+    assert client.get("/api/analytics?window=forever").status_code == 400
+
+
+
+def test_persistent_process_history_and_incident_routes(monkeypatch):
+    import nexus_dash.api.server as server
+    from nexus_dash.services.telemetry_store import TelemetryStore
+    import os
+    import psutil
+    test_store = TelemetryStore(server.TELEMETRY_STORE.directory / "route-contract", sample_interval_seconds=0)
+    monkeypatch.setattr(server, "TELEMETRY_STORE", test_store)
+    created = psutil.Process(os.getpid()).create_time()
+    test_store.record_process_samples([{
+        "pid": os.getpid(), "create_time": created, "process_name": "pytest",
+        "epoch": __import__("time").time(), "cpu_percent": 2, "rss_mb": 40, "threads": 1,
+        "read_bytes": 10, "write_bytes": 20,
+    }])
+    history = client.get(f"/api/process-history?pid={os.getpid()}&create_time={created}&window=24h")
+    assert history.status_code == 200
+    assert history.json()["count"] == 1
+    capture = client.post("/api/incidents/capture", json={"title": "Manual test capture", "note": "route test"})
+    assert capture.status_code == 200
+    incident_id = capture.json()["incident"]["id"]
+    assert client.get(f"/api/incidents/{incident_id}").status_code == 200
+    assert client.get("/api/incidents?limit=10").status_code == 200
+
+
+
+def test_terminal_executes_real_read_only_local_commands():
+    for command in ("cpu", "memory", "drives", "interfaces", "uptime", "processes 5 sort=memory"):
+        response = client.post("/api/terminal", json={"command": command})
+        assert response.status_code == 200, (command, response.text)
+        assert isinstance(response.json().get("stdout"), str)
+        assert response.json()["returncode"] == 0
+
+
+def test_terminal_process_inspector_reports_current_process():
+    import os
+    response = client.post("/api/terminal", json={"command": f"process {os.getpid()}"})
+    assert response.status_code == 200
+    assert f"PID / parent: {os.getpid()}" in response.json()["stdout"]
+
+
+def test_terminal_command_maximum_length_is_enforced_by_api():
+    response = client.post("/api/terminal", json={"command": "?" * 257})
+    assert response.status_code == 422

@@ -1,61 +1,132 @@
-# Contributing to NEXUS-DASH
+# 🤝 Contributing to NEXUS-DASH
 
-Thanks for contributing to NEXUS-DASH. The project is a local-first system monitoring application; contributions should preserve its security boundary and cyberpunk visual identity.
+Thank you for helping improve NEXUS-DASH. Contributions should make diagnostics more reliable while preserving the project's local-first design, security boundaries and accessible dark/neon-green interface.
 
-## Development setup
+## 📚 Before you start
 
-    git clone https://github.com/ItsWanheda/nexus-dash.git
-    cd nexus-dash
-    python -m venv .venv
+1. Read the [README](README.md) to understand the application and supported workflows.
+2. Review the [project structure](docs/architecture/PROJECT_STRUCTURE.md) before moving files or changing imports.
+3. Read the [security model](docs/architecture/SECURITY_MODEL.md) and [Security Policy](SECURITY.md) before changing network, process-control, persistence or assistant behaviour.
+4. Search existing issues and pull requests before starting duplicate work.
+
+## 🛠️ Development setup
+
+```bash
+git clone https://github.com/ItsWanheda/nexus-dash.git
+cd nexus-dash
+python -m venv .venv
+```
 
 Activate the environment:
 
 **Windows PowerShell**
-
-    .\.venv\Scripts\Activate.ps1
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
 
 **Linux / macOS**
+```bash
+source .venv/bin/activate
+```
 
-    source .venv/bin/activate
+Install development dependencies:
 
-Install runtime and test dependencies:
+```bash
+python -m pip install -r requirements-dev.txt
+```
 
-    python -m pip install -r requirements-dev.txt
+Run the API and static UI in separate terminals:
 
-Start the API and UI in two terminals:
+```bash
+python server.py
+python -m http.server 5500 --bind 127.0.0.1
+```
 
-    python server.py
-    python -m http.server 5500 --bind 127.0.0.1
+Open <http://127.0.0.1:5500>. Do not use a `file://` URL; the UI must be served from an allowed local origin.
 
-Then open http://127.0.0.1:5500.
+## 🧱 Engineering principles
 
-## Engineering rules
+### Security is a feature
+- Keep the API loopback-only and preserve trusted-host, client-IP and origin checks.
+- Do not add public network access, credentialed CORS, arbitrary shell execution, command chaining, `eval`, or unrestricted subprocess calls.
+- Keep diagnostic commands explicitly allowlisted and bounded.
+- Process termination must remain opt-in, identity-checked and restricted to eligible same-user processes. Never terminate processes automatically from thresholds or alerts.
+- Fan and SMART operations must remain read-only.
 
-- Keep the API on loopback and preserve origin/host checks. Do not add public network access or credentialed CORS.
-- Never add arbitrary shell execution, shell command chaining, eval, or unrestricted process control.
-- Treat hardware counters and OS event sources as best-effort; unsupported metrics/sources must be marked unavailable rather than fabricated.
-- Diagnostic findings must expose evidence and limitations. Never label correlation as causation or infer a memory leak from one increasing RSS series.
-- Bound process snapshots, historical storage, request inputs, and export sizes.
-- Keep persistent telemetry privacy-conscious. Do not store hostnames, usernames, command lines, or executable paths in resource history without a separately reviewed design.
-- Use accessible controls, keyboard focus states, reduced-motion support, and responsive layouts; preserve the dark/neon-green visual direction.
-- Keep frontend JavaScript dependency-free unless a dependency is justified and documented.
+### Evidence over assumptions
+- Treat hardware counters, sensors and OS event sources as best-effort.
+- Mark unsupported or missing values unavailable; never substitute fabricated zeros.
+- Findings must expose evidence, thresholds and limitations. Correlation is not causation; observed memory growth is not proof of a leak.
+- Do not describe socket ownership as per-process bandwidth.
 
-## Validation
+### Privacy and resource bounds
+- Keep telemetry local and retention bounded.
+- Do not persist usernames, executable paths, command lines, packet contents, MAC addresses or socket IP endpoints without a separately reviewed design.
+- Explain clearly when feature-specific tables retain process names/PIDs or user-configured network target labels.
+- Bound API inputs, process snapshots, sampling work, database rows, incident payloads and export sizes.
 
-Run before opening a pull request:
+### Maintainable UI and architecture
+- Keep the frontend dependency-free unless a new dependency has a clear, documented benefit.
+- Preserve keyboard focus, reduced-motion support and responsive layouts.
+- Keep backend entry points and imports compatible with the desktop build unless a migration updates every dependent path and is validated.
+- Update the documentation index and relevant guides when paths or behaviour change.
 
-    node --check src/static/app.js
-    node --check src/static/flight-recorder.js
-    node --check src/static/diagnostics.js
-    python -m compileall -q server.py telemetry_store.py diagnostics.py tests
-    python -m pytest -q
+## ✅ Validation
 
-For UI changes, manually verify the relevant routes at desktop and mobile widths. For process features, test under a standard user account on supported operating systems and avoid terminating processes containing unsaved work.
+Run the full test suite:
 
-## Pull request checklist
+```bash
+python -m pytest -q
+```
 
-- [ ] Explain user-visible changes and security implications.
-- [ ] Add or update automated tests.
-- [ ] Update README.md, CHANGELOG.md, and relevant documentation.
-- [ ] Confirm no secrets, local database files, exports, or generated artefacts are committed.
-- [ ] Keep changes focused; do not combine unrelated refactors.
+Check all frontend modules:
+
+```bash
+node --check src/static/app.js
+node --check src/static/flight-recorder.js
+node --check src/static/diagnostics.js
+node --check src/static/hardware.js
+node --check src/static/storage.js
+node --check src/static/nexus-enhancements.js
+node --check src/static/network-analytics.js
+node --check src/static/assistant.js
+```
+
+Compile Python modules and tests:
+
+```bash
+python -m compileall -q nexus_dash tests server.py desktop_app.py
+```
+
+For relevant changes, also verify:
+- [ ] Linux/macOS local-server startup where supported.
+- [ ] Windows desktop packaging and a manual window/tray smoke test.
+- [ ] Missing hardware providers and permission-denied paths.
+- [ ] Mobile and desktop UI layouts, keyboard navigation and reduced motion.
+- [ ] SQLite retention, Clear History and export behaviour.
+- [ ] Loopback, origin and process identity safeguards.
+
+## 📝 Pull request checklist
+
+- [ ] Describe the problem, approach and user-visible impact.
+- [ ] Explain security and privacy implications.
+- [ ] Add or update tests for changed behaviour.
+- [ ] Update README, CHANGELOG and relevant guides.
+- [ ] Check all relative documentation links after moving files.
+- [ ] Confirm no secrets, local databases, exports, build outputs or generated artifacts are committed.
+- [ ] Keep the diff focused and avoid unrelated refactors.
+
+## 💬 Commit message convention
+
+Use concise, imperative Conventional Commit messages:
+
+```text
+feat: add bounded process history
+fix: reject stale process identities
+docs: clarify local telemetry retention
+refactor: isolate network sampling helpers
+test: cover missing hardware providers
+build: harden Windows packaging workflow
+```
+
+Prefer one logical change per commit. Include a scope when it adds clarity, and explain non-obvious decisions in the commit body.

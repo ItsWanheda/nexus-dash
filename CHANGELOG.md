@@ -4,6 +4,34 @@ All notable changes to NEXUS-DASH are recorded here. Unreleased changes are part
 
 ## [Unreleased]
 
+### Changed — Repository organization and documentation
+- Reorganized documentation into navigable guides under `docs/guides/` and architecture references under `docs/architecture/`, with a new index at `docs/README.md`.
+- Rewrote the README with a feature overview, safer setup instructions, API summary, privacy notes, documentation links and an accurate repository map.
+- Added project-structure and security-model references explaining module responsibilities, runtime entry points, trust boundaries and safe future refactors.
+- Refreshed diagnostics, Flight Recorder, hardware/storage, and Terminal/Sentinel guides with clearer sections, tables, tips, warnings and current feature behaviour.
+- Corrected the Security Policy and contributor instructions to reflect current process/network history, incident retention, optional integrations and validation commands.
+- Moved Python implementation modules into the `nexus_dash` package, separating API composition, desktop integration and reusable services.
+- Kept `server.py` and `desktop_app.py` as compatibility launchers for existing CLI commands and the historical `server:app` ASGI target.
+- Updated package imports, tests, CI compilation paths, project-structure documentation and desktop asset resolution for the new layout.
+
+### Added — Diagnostic Terminal, Cross-Vendor Hardware, Process/Network Intelligence, Forensics and NEXUS Sentinel
+- Replaced the status-only diagnostic terminal with an explicit CMD-like allowlist for CPU/RAM, drives, process listing/inspection, network interfaces/sockets, DNS, TCP handshake and bounded ping diagnostics. Shell operators, arbitrary executables, command chaining and destructive commands remain unsupported.
+- Added AMD, NVIDIA and Intel GPU inventory through Windows WMI/Linux PCI data; added optional AMD SMI metrics on supported Linux AMDGPU/ROCm systems and Linux PCI ID name resolution for older adapters.
+- Added SMBIOS/DMI or Windows WMI system, baseboard and BIOS identity. Added Windows LibreHardwareMonitor WMI sensors and Linux hwmon/psutil fan RPM and temperature discovery. Fan monitoring is read-only.
+- Added durable per-process CPU/RSS/thread/disk I/O history to SQLite, keyed by PID and process creation time, with bounded sampling and retention.
+- Added optional Linux NetHogs per-process upload/download byte-rate attribution. Unsupported Windows/macOS accounting providers report capability limitations rather than fabricated bandwidth numbers.
+- Added opt-in continuous DNS/TCP quality checks for up to three configured targets, with persistent latency, latency-swing and TCP failure history plus repeated-degradation events.
+- Added rolling median/MAD adaptive anomaly detection, bounded manual/automatic incident captures, incident evidence viewing and JSON export.
+- Added NEXUS Sentinel, a local Ollama assistant using installed models only (default qwen3.5:4b), with optional telemetry context and a deterministic offline diagnostic guide. No cloud fallback, model auto-download or command execution.
+- Updated hardware, process, network and diagnostics UI, settings, API docs, CI coverage and troubleshooting guidance.
+
+### Added — Network Intelligence and Advanced Analytics
+- Added per-interface upload/download and packet rates, link state, speed/MTU/duplex, error/drop deltas, local interface history and link-transition events.
+- Added bounded live TCP/UDP socket inventory with process attribution and opt-in IP address reveal; socket rows and destinations are not persisted.
+- Added manual DNS/TCP connectivity diagnostics with resolver latency, handshake latency, jitter and bounded attempts. No application payload is sent.
+- Added 7-day and 30-day analytics windows, average/min/max/p50/p95 statistics, utilisation distributions, UTC-hour profiles, trend buckets, incident frequency and equal-length previous-period comparisons.
+- Added independent CPU, memory, storage and network evidence scorecards. Thermal history is explicitly marked not recorded; no arbitrary combined health score is produced.
+
 ### Added — Process Intelligence, Investigation Timeline, Alert Center, Custom Workspace, Settings, and Windows Desktop
 - Added identity-checked process inspection, CPU/RAM history and observed memory growth, two-process comparison, threads, uptime, disk I/O, executable metadata, and OS-dependent handles/file descriptors.
 - Added a local SQLite investigation timeline with resource-pressure and process lifecycle events plus user-authored incident markers.

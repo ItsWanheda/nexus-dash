@@ -36,7 +36,7 @@ function renderHardware() {
     '<section class="panel telemetry-panel"><div class="panel-heading"><div><span class="eyebrow">PROCESSOR</span><h3>CPU</h3></div><span id="hardware-cpu-status" class="panel-tag">LOADING</span></div><div id="hardware-cpu-summary" class="telemetry-reading-list"><p class="muted">Collecting CPU readings…</p></div><div class="divider"></div><h4 class="telemetry-subheading">Logical cores</h4><div id="hardware-cores" class="core-grid"><p class="muted">Waiting for core readings…</p></div><div class="divider"></div><h4 class="telemetry-subheading">CPU temperature sensors</h4><div id="hardware-cpu-temperatures"><p class="muted">Waiting for sensors…</p></div></section>' +
     '<section class="panel telemetry-panel"><div class="panel-heading"><div><span class="eyebrow">GRAPHICS</span><h3>GPU devices</h3></div><span id="hardware-gpu-status" class="panel-tag">LOADING</span></div><div id="hardware-gpu"><p class="muted">Querying optional GPU providers…</p></div></section>' +
     '<section class="panel telemetry-panel"><div class="panel-heading"><div><span class="eyebrow">SYSTEM MEMORY</span><h3>RAM and pagefile</h3></div><span id="hardware-memory-status" class="panel-tag">LOADING</span></div><div id="hardware-memory" class="telemetry-reading-list"><p class="muted">Collecting memory readings…</p></div></section>' +
-    '<section class="panel telemetry-panel"><div class="panel-heading"><div><span class="eyebrow">BOARD SENSORS</span><h3>Motherboard and cooling</h3></div><span id="hardware-board-status" class="panel-tag">LOADING</span></div><h4 class="telemetry-subheading">Temperatures</h4><div id="hardware-board-temperatures"></div><div class="divider"></div><h4 class="telemetry-subheading">Fan speeds</h4><div id="hardware-fans"></div><p class="table-note">Sensor visibility depends on firmware, drivers, permissions, and the platform.</p></section>' +
+    '<section class="panel telemetry-panel"><div class="panel-heading"><div><span class="eyebrow">BOARD SENSORS</span><h3>Motherboard and cooling</h3></div><span id="hardware-board-status" class="panel-tag">LOADING</span></div><h4 class="telemetry-subheading">System and board identity</h4><div id="hardware-system-identity" class="telemetry-reading-list"><p class="muted">Reading SMBIOS / DMI…</p></div><div class="divider"></div><h4 class="telemetry-subheading">Temperatures</h4><div id="hardware-board-temperatures"></div><div class="divider"></div><h4 class="telemetry-subheading">Fan speeds</h4><div id="hardware-fans"></div><p class="table-note">Sensor visibility depends on firmware, drivers, permissions, and the platform.</p></section>' +
     '<section class="panel telemetry-panel"><div class="panel-heading"><div><span class="eyebrow">PORTABLE POWER</span><h3>Battery</h3></div><span id="hardware-battery-status" class="panel-tag">LOADING</span></div><div id="hardware-battery" class="telemetry-reading-list"><p class="muted">Checking battery telemetry…</p></div></section>' +
     '</div><p class="table-note">Readings update every five seconds while this view is open. CPU voltage, battery health, and charge cycles are shown as unavailable unless a provider reports a real value. Detailed drive temperature and health are available in Storage when supported.</p>';
   loadHardware();
@@ -76,7 +76,10 @@ async function loadHardware() {
     document.getElementById('hardware-gpu').innerHTML = gpuDevices.length
       ? gpuDevices.map(function (device) {
           return '<article class="hardware-device"><div class="panel-heading compact"><strong>' + escapeHTML(device.name || 'GPU device') +
-            '</strong>' + hardwareStatus(device.status) + '</div><div class="telemetry-reading-list">' +
+            '</strong>' + hardwareStatus(device.status) + '</div><div class="hardware-device-meta"><span>' + escapeHTML(device.vendor || 'Unknown vendor') + '</span>' +
+            (device.device_id ? '<span>Device ' + escapeHTML(device.device_id) + '</span>' : '') +
+            (device.driver_version ? '<span>Driver ' + escapeHTML(device.driver_version) + '</span>' : '') +
+            (device.pci_address ? '<span>PCI ' + escapeHTML(device.pci_address) + '</span>' : '') + '</div><div class="telemetry-reading-list">' +
             hardwareReadingRow('GPU utilisation', device.utilization_percent) +
             hardwareReadingRow('VRAM used', device.memory_used_gb) +
             hardwareReadingRow('VRAM total', device.memory_total_gb) +
@@ -84,7 +87,9 @@ async function loadHardware() {
             hardwareReadingRow('Power draw', device.power_w) +
             hardwareReadingRow('Graphics clock', device.graphics_clock_mhz, 0) +
             hardwareReadingRow('Memory clock', device.memory_clock_mhz, 0) +
-            hardwareReadingRow('Fan speed', device.fan_percent) + '</div></article>';
+            hardwareReadingRow('Fan speed', device.fan_percent) +
+            hardwareReadingRow('Fan tachometer', device.fan_rpm) + '</div>' +
+            (device.reason ? '<p class="table-note">' + escapeHTML(device.reason) + '</p>' : '') + '</article>';
         }).join('')
       : '<p class="empty-state">' + escapeHTML(gpu.reason || 'NVIDIA telemetry unavailable. Install a compatible driver and optional NVML package for NVIDIA readings.') + '</p>';
     const memory = payload.memory || {};
@@ -105,7 +110,24 @@ async function loadHardware() {
       escapeHTML((memory.pressure && memory.pressure.level) || 'Unavailable') + '</strong><small>' +
       escapeHTML((memory.pressure && memory.pressure.source) || 'No pressure provider') + '</small></div>';
     const board = payload.motherboard || {};
-    setText('hardware-board-status', (board.temperatures && board.temperatures.status) || (board.fans && board.fans.status) || 'Unavailable');
+    const system = payload.system || {};
+    const identity = board.identity || {};
+    const bios = board.bios || {};
+    const identityRows = [
+      ['System manufacturer', system.manufacturer], ['System model', system.model],
+      ['System family', system.family], ['Motherboard manufacturer', identity.manufacturer],
+      ['Motherboard model', identity.model], ['Board version', identity.version],
+      ['BIOS vendor', bios.vendor], ['BIOS version', bios.version], ['BIOS release', bios.release_date]
+    ];
+    document.getElementById('hardware-system-identity').innerHTML =
+      identityRows.map(function (pair) {
+        return hardwareReadingRow(pair[0], {
+          value: pair[1] || null, unit: '',
+          status: pair[1] ? 'Available' : 'Unavailable'
+        });
+      }).join('') + '<p class="table-note">Source: ' + escapeHTML(board.identity_source || 'SMBIOS / DMI / WMI') + '</p>';
+    const boardHasIdentity = Boolean(identity.model || system.model);
+    setText('hardware-board-status', (board.temperatures && board.temperatures.status) || (board.fans && board.fans.status) || (boardHasIdentity ? 'Inventory only' : 'Unavailable'));
     document.getElementById('hardware-board-temperatures').innerHTML =
       hardwareSensorMarkup(board.temperatures && board.temperatures.sensors, '°C', 'current_c');
     const fans = board.fans && board.fans.sensors;
