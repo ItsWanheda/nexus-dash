@@ -122,6 +122,75 @@ class TelemetryStore:
                 "CREATE INDEX IF NOT EXISTS idx_network_samples_name_time "
                 "ON network_interface_samples(interface_name, sampled_epoch)"
             )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS process_performance_samples (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sampled_epoch REAL NOT NULL,
+                    pid INTEGER NOT NULL,
+                    create_time REAL NOT NULL,
+                    process_name TEXT NOT NULL,
+                    cpu_percent REAL,
+                    rss_mb REAL,
+                    threads INTEGER,
+                    read_bytes INTEGER,
+                    write_bytes INTEGER,
+                    read_bytes_per_sec REAL,
+                    write_bytes_per_sec REAL
+                )"""
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_process_history_identity_time "
+                "ON process_performance_samples(pid, create_time, sampled_epoch)"
+            )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS network_quality_samples (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sampled_epoch REAL NOT NULL,
+                    host_label TEXT NOT NULL,
+                    port INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    dns_latency_ms REAL,
+                    tcp_latency_ms REAL,
+                    jitter_ms REAL,
+                    packet_loss_percent REAL,
+                    success_count INTEGER,
+                    failure_count INTEGER
+                )"""
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_network_quality_time "
+                "ON network_quality_samples(sampled_epoch)"
+            )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS process_network_samples (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sampled_epoch REAL NOT NULL,
+                    pid INTEGER NOT NULL,
+                    process_name TEXT NOT NULL,
+                    upload_bytes_per_sec REAL,
+                    download_bytes_per_sec REAL,
+                    provider TEXT NOT NULL
+                )"""
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_process_network_time "
+                "ON process_network_samples(sampled_epoch, pid)"
+            )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS incident_captures (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_epoch REAL NOT NULL,
+                    severity TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    trigger TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                )"""
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_incident_captures_time "
+                "ON incident_captures(created_epoch)"
+            )
             connection.commit()
         try:
             os.chmod(self.directory, 0o700)
@@ -227,6 +296,10 @@ class TelemetryStore:
             connection.execute("DELETE FROM telemetry_samples")
             connection.execute("DELETE FROM timeline_events")
             connection.execute("DELETE FROM network_interface_samples")
+            connection.execute("DELETE FROM process_performance_samples")
+            connection.execute("DELETE FROM network_quality_samples")
+            connection.execute("DELETE FROM process_network_samples")
+            connection.execute("DELETE FROM incident_captures")
             connection.commit()
 
 
@@ -452,3 +525,257 @@ class TelemetryStore:
             "current": current,
             "previous": previous,
         }
+
+
+    def record_process_samples(self, samples: list[dict[str, Any]], *, max_rows: int = 1_000_000) -> int:
+        """Persist bounded process metrics without paths, command lines, or owner names."""
+        if not isinstance(samples, list) or not samples:
+            return 0
+        now = time.time()
+        prepared: list[tuple[Any, ...]] = []
+        for item in samples[:100]:
+            if not isinstance(item, dict):
+                continue
+            try:
+                pid = int(item.get("pid"))
+                created = float(item.get("create_time"))
+                epoch = float(item.get("epoch") or now)
+            except (TypeError, ValueError):
+                continue
+            if pid <= 0 or created <= 0 or epoch <= 0:
+                continue
+            name = str(item.get("process_name") or item.get("name") or "Unknown")[:120]
+            cpu = _number(item.get("cpu_percent"))
+            rss = _number(item.get("rss_mb"))
+            threads = _number(item.get("threads"))
+            read_bytes = _number(item.get("read_bytes"))
+            write_bytes = _number(item.get("write_bytes"))
+            prepared.append((epoch, pid, created, name,
+                             max(0.0, min(1000.0, float(cpu))) if cpu is not None else None,
+                             max(0.0, float(rss)) if rss is not None else None,
+                             max(0, int(threads)) if threads is not None else None,
+                             max(0, int(read_bytes)) if read_bytes is not None else None,
+                             max(0, int(write_bytes)) if write_bytes is not None else None))
+        if not prepared:
+            return 0
+        recorded = 0
+        with self._lock, closing(self._connect()) as connection:
+            for row in prepared:
+                epoch, pid, created, name, cpu, rss, threads, read_bytes, write_bytes = row
+                previous = connection.execute(
+                    """SELECT sampled_epoch, read_bytes, write_bytes
+                       FROM process_performance_samples
+                       WHERE pid = ? AND create_time = ?
+                       ORDER BY sampled_epoch DESC LIMIT 1""",
+                    (pid, created),
+                ).fetchone()
+                read_rate = write_rate = None
+                if previous:
+                    elapsed = epoch - float(previous["sampled_epoch"])
+                    if elapsed > 0:
+                        old_read, old_write = previous["read_bytes"], previous["write_bytes"]
+                        if read_bytes is not None and old_read is not None and read_bytes >= old_read:
+                            read_rate = round((read_bytes - int(old_read)) / elapsed, 2)
+                        if write_bytes is not None and old_write is not None and write_bytes >= old_write:
+                            write_rate = round((write_bytes - int(old_write)) / elapsed, 2)
+                connection.execute(
+                    """INSERT INTO process_performance_samples(
+                        sampled_epoch, pid, create_time, process_name, cpu_percent,
+                        rss_mb, threads, read_bytes, write_bytes, read_bytes_per_sec, write_bytes_per_sec
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (epoch, pid, created, name, cpu, rss, threads, read_bytes, write_bytes, read_rate, write_rate),
+                )
+                recorded += 1
+            connection.execute(
+                "DELETE FROM process_performance_samples WHERE sampled_epoch < ?",
+                (now - self.retention_seconds,),
+            )
+            connection.execute(
+                """DELETE FROM process_performance_samples WHERE id IN (
+                    SELECT id FROM process_performance_samples
+                    ORDER BY sampled_epoch DESC LIMIT -1 OFFSET ?
+                )""",
+                (max(1000, min(int(max_rows), 1_200_000)),),
+            )
+            connection.commit()
+        return recorded
+
+    def get_process_history(self, pid: int, create_time: float, window_seconds: int, limit: int = 2000) -> list[dict[str, Any]]:
+        cutoff = time.time() - max(60, min(int(window_seconds), 30 * 86400))
+        bounded_limit = max(1, min(int(limit), 2000))
+        with self._lock, closing(self._connect()) as connection:
+            rows = connection.execute(
+                """SELECT sampled_epoch, pid, create_time, process_name, cpu_percent,
+                          rss_mb, threads, read_bytes, write_bytes,
+                          read_bytes_per_sec, write_bytes_per_sec
+                   FROM (
+                     SELECT sampled_epoch, pid, create_time, process_name, cpu_percent,
+                            rss_mb, threads, read_bytes, write_bytes,
+                            read_bytes_per_sec, write_bytes_per_sec
+                     FROM process_performance_samples
+                     WHERE pid = ? AND create_time = ? AND sampled_epoch >= ?
+                     ORDER BY sampled_epoch DESC LIMIT ?
+                   )
+                   ORDER BY sampled_epoch ASC""",
+                (int(pid), float(create_time), cutoff, bounded_limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_network_quality(self, sample: dict[str, Any]) -> bool:
+        if not isinstance(sample, dict):
+            return False
+        try:
+            epoch = float(sample.get("sampled_epoch") or time.time())
+            port = int(sample.get("port"))
+        except (TypeError, ValueError):
+            return False
+        host = str(sample.get("host_label") or "").strip()[:253]
+        status = str(sample.get("status") or "unknown")[:40]
+        if not host or not 1 <= port <= 65535:
+            return False
+        values = (
+            epoch, host, port, status, _number(sample.get("dns_latency_ms")),
+            _number(sample.get("tcp_latency_ms")), _number(sample.get("jitter_ms")),
+            _number(sample.get("packet_loss_percent")),
+            max(0, int(_number(sample.get("success_count"), 0) or 0)),
+            max(0, int(_number(sample.get("failure_count"), 0) or 0)),
+        )
+        with self._lock, closing(self._connect()) as connection:
+            connection.execute(
+                """INSERT INTO network_quality_samples(
+                    sampled_epoch, host_label, port, status, dns_latency_ms, tcp_latency_ms,
+                    jitter_ms, packet_loss_percent, success_count, failure_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                values,
+            )
+            connection.execute("DELETE FROM network_quality_samples WHERE sampled_epoch < ?",
+                               (time.time() - self.retention_seconds,))
+            connection.execute(
+                """DELETE FROM network_quality_samples WHERE id IN (
+                    SELECT id FROM network_quality_samples ORDER BY sampled_epoch DESC
+                    LIMIT -1 OFFSET 100000
+                )"""
+            )
+            connection.commit()
+        return True
+
+    def get_network_quality(self, window: str = "24h", limit: int = 1000) -> list[dict[str, Any]]:
+        if window not in WINDOW_SECONDS:
+            raise ValueError("Unsupported network quality history window.")
+        cutoff = time.time() - WINDOW_SECONDS[window]
+        bounded_limit = max(1, min(int(limit), 2000))
+        with self._lock, closing(self._connect()) as connection:
+            rows = connection.execute(
+                """SELECT sampled_epoch, host_label, port, status, dns_latency_ms,
+                          tcp_latency_ms, jitter_ms, packet_loss_percent, success_count, failure_count
+                   FROM (
+                     SELECT sampled_epoch, host_label, port, status, dns_latency_ms,
+                            tcp_latency_ms, jitter_ms, packet_loss_percent, success_count, failure_count
+                     FROM network_quality_samples WHERE sampled_epoch >= ?
+                     ORDER BY sampled_epoch DESC LIMIT ?
+                   ) ORDER BY sampled_epoch ASC""",
+                (cutoff, bounded_limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_process_network(self, samples: list[dict[str, Any]]) -> int:
+        if not isinstance(samples, list):
+            return 0
+        now = time.time()
+        prepared = []
+        for item in samples[:200]:
+            try:
+                pid = int(item.get("pid"))
+                upload = _number(item.get("upload_bytes_per_sec"))
+                download = _number(item.get("download_bytes_per_sec"))
+            except (TypeError, ValueError):
+                continue
+            if pid <= 0 or upload is None or download is None:
+                continue
+            prepared.append((now, pid, str(item.get("process_name") or "Unknown")[:120],
+                             max(0.0, upload), max(0.0, download), str(item.get("provider") or "unknown")[:40]))
+        if not prepared:
+            return 0
+        with self._lock, closing(self._connect()) as connection:
+            connection.executemany(
+                """INSERT INTO process_network_samples(
+                    sampled_epoch, pid, process_name, upload_bytes_per_sec, download_bytes_per_sec, provider
+                ) VALUES (?, ?, ?, ?, ?, ?)""",
+                prepared,
+            )
+            connection.execute("DELETE FROM process_network_samples WHERE sampled_epoch < ?",
+                               (now - self.retention_seconds,))
+            connection.execute(
+                """DELETE FROM process_network_samples WHERE id IN (
+                    SELECT id FROM process_network_samples ORDER BY sampled_epoch DESC
+                    LIMIT -1 OFFSET 100000
+                )"""
+            )
+            connection.commit()
+        return len(prepared)
+
+    def get_process_network_history(self, window: str = "24h", limit: int = 500) -> list[dict[str, Any]]:
+        if window not in WINDOW_SECONDS:
+            raise ValueError("Unsupported process network history window.")
+        cutoff = time.time() - WINDOW_SECONDS[window]
+        with self._lock, closing(self._connect()) as connection:
+            rows = connection.execute(
+                """SELECT sampled_epoch, pid, process_name, upload_bytes_per_sec,
+                          download_bytes_per_sec, provider
+                   FROM (
+                     SELECT sampled_epoch, pid, process_name, upload_bytes_per_sec,
+                            download_bytes_per_sec, provider
+                     FROM process_network_samples WHERE sampled_epoch >= ?
+                     ORDER BY sampled_epoch DESC LIMIT ?
+                   ) ORDER BY sampled_epoch ASC""",
+                (cutoff, max(1, min(int(limit), 2000))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def create_incident_capture(
+        self, title: str, summary: str, severity: str, trigger: str,
+        evidence: dict[str, Any], *, created_epoch: float | None = None,
+    ) -> dict[str, Any]:
+        now = float(created_epoch if created_epoch is not None else time.time())
+        severity_value = severity if severity in {"info", "warning", "critical"} else "info"
+        safe_title = str(title)[:120]
+        safe_summary = str(summary)[:1000]
+        safe_trigger = str(trigger)[:60]
+        payload = json.dumps(evidence, separators=(",", ":"), allow_nan=False)
+        if len(payload.encode("utf-8")) > 2_000_000:
+            raise ValueError("Incident evidence exceeded the 2 MB capture limit.")
+        with self._lock, closing(self._connect()) as connection:
+            cursor = connection.execute(
+                """INSERT INTO incident_captures(created_epoch, severity, title, trigger, summary, payload)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (now, severity_value, safe_title, safe_trigger, safe_summary, payload),
+            )
+            connection.execute(
+                """DELETE FROM incident_captures WHERE id IN (
+                    SELECT id FROM incident_captures ORDER BY created_epoch DESC LIMIT -1 OFFSET 250
+                )"""
+            )
+            connection.commit()
+            incident_id = int(cursor.lastrowid)
+        return {"id": incident_id, "created_epoch": now, "severity": severity_value,
+                "title": safe_title, "trigger": safe_trigger, "summary": safe_summary}
+
+    def get_incidents(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._lock, closing(self._connect()) as connection:
+            rows = connection.execute(
+                """SELECT id, created_epoch, severity, title, trigger, summary
+                   FROM incident_captures ORDER BY created_epoch DESC LIMIT ?""",
+                (max(1, min(int(limit), 250)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_incident(self, incident_id: int) -> dict[str, Any] | None:
+        with self._lock, closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT * FROM incident_captures WHERE id = ?", (int(incident_id),)
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["evidence"] = json.loads(result.pop("payload"))
+        return result
