@@ -32,6 +32,8 @@ from hardware import collect_hardware
 from storage_metrics import StorageSampler
 from process_intelligence import ProcessIntelligence
 from settings_store import SettingsStore
+from network_metrics import NetworkSampler, collect_connections, diagnose_tcp_connectivity, build_network_history_points
+from analytics import build_analytics_report
 
 LOGGER = logging.getLogger("nexus")
 ALLOWED_ORIGINS = {
@@ -47,6 +49,8 @@ PROCESS_MEMORY_TRACKER = ProcessMemoryTracker()
 STORAGE_SAMPLER = StorageSampler()
 SETTINGS_STORE = SettingsStore(TELEMETRY_STORE.directory)
 PROCESS_INTELLIGENCE = ProcessIntelligence()
+NETWORK_SAMPLER = NetworkSampler()
+_NETWORK_ERROR_ACTIVE: set[str] = set()
 _TIMELINE_THRESHOLDS: dict[str, bool] = {}
 _RECORDER_STOP = threading.Event()
 _RECORDER_THREAD: threading.Thread | None = None
@@ -217,9 +221,46 @@ def get_stats() -> dict[str, Any]:
     return payload
 
 
+def _record_network_events(snapshot: dict[str, Any]) -> None:
+    for transition in snapshot.get("transitions", []):
+        name = str(transition.get("name") or "interface")[:128]
+        is_up = bool(transition.get("is_up"))
+        TELEMETRY_STORE.record_event(
+            "network", f"Network interface {name} {'connected' if is_up else 'disconnected'}",
+            "Link state changed; this is an observation, not a confirmed connectivity failure.",
+            severity="info" if is_up else "warning",
+            metadata={"interface": name, "is_up": is_up},
+        )
+    for interface in snapshot.get("interfaces", []):
+        name = str(interface.get("name") or "interface")[:128]
+        errors = sum(int(interface.get(key) or 0) for key in ("errors_in_delta", "errors_out_delta"))
+        drops = sum(int(interface.get(key) or 0) for key in ("drops_in_delta", "drops_out_delta"))
+        active = name in _NETWORK_ERROR_ACTIVE
+        if errors > 0 or drops > 0:
+            if not active:
+                TELEMETRY_STORE.record_event(
+                    "network", f"Network errors or drops observed on {name}",
+                    f"Observed {errors} new errors and {drops} new dropped packets since the last sample.",
+                    severity="warning" if errors or drops else "info",
+                    metadata={"interface": name, "errors": errors, "drops": drops},
+                )
+                _NETWORK_ERROR_ACTIVE.add(name)
+        else:
+            _NETWORK_ERROR_ACTIVE.discard(name)
+
+
+def _collect_network_snapshot() -> dict[str, Any]:
+    snapshot = NETWORK_SAMPLER.collect()
+    if snapshot.get("interfaces"):
+        TELEMETRY_STORE.record_network_interfaces(
+            snapshot["interfaces"], sampled_epoch=snapshot.get("sampled_at")
+        )
+        _record_network_events(snapshot)
+    return snapshot
+
+
 def _recorder_loop() -> None:
     cycle = 0
-    elapsed = 0
     while not _RECORDER_STOP.is_set():
         try:
             settings = SETTINGS_STORE.get()
@@ -232,6 +273,10 @@ def _recorder_loop() -> None:
                 payload = _collect_stats()
                 if TELEMETRY_STORE.record(payload):
                     _record_resource_events(payload)
+                try:
+                    _collect_network_snapshot()
+                except Exception:
+                    LOGGER.exception("Background network sample failed")
                 cycle += interval
                 if settings["process_history_enabled"] and cycle >= int(settings["process_history_interval_seconds"]):
                     process_events = PROCESS_INTELLIGENCE.sample(settings.get("process_exclusions", []))
@@ -335,6 +380,62 @@ def get_storage() -> dict[str, Any]:
     except Exception:
         LOGGER.exception("Unable to collect storage telemetry")
         raise HTTPException(status_code=503, detail="Storage telemetry is temporarily unavailable.")
+
+
+@app.get("/api/network")
+def get_network() -> dict[str, Any]:
+    """Return per-interface counters, rates, link state, and error/drop deltas."""
+    try:
+        return _collect_network_snapshot()
+    except Exception:
+        LOGGER.exception("Unable to collect per-interface network telemetry")
+        raise HTTPException(status_code=503, detail="Network telemetry is temporarily unavailable.")
+
+
+@app.get("/api/network/connections")
+def get_network_connections(
+    limit: int = Query(default=200, ge=1, le=500),
+    include_addresses: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Return a bounded live socket table. IP addresses require explicit opt-in."""
+    try:
+        return collect_connections(limit=limit, include_addresses=include_addresses)
+    except Exception:
+        LOGGER.exception("Unable to enumerate network connections")
+        raise HTTPException(status_code=503, detail="Network connection data is temporarily unavailable.")
+
+
+@app.get("/api/network/history")
+def get_network_history(
+    window: str = Query(default="24h"),
+    interface: str | None = Query(default=None, min_length=1, max_length=128),
+    limit: int = Query(default=600, ge=1, le=2000),
+) -> dict[str, Any]:
+    if window not in WINDOW_SECONDS:
+        raise HTTPException(status_code=400, detail="Unsupported network history window.")
+    try:
+        rows = TELEMETRY_STORE.get_network_history(
+            window, interface=interface, limit_per_interface=limit
+        )
+        points = build_network_history_points(rows)
+        return {"window": window, "interface": interface, "count": len(points),
+                "samples": points, "storage": "local-sqlite"}
+    except (OSError, RuntimeError, ValueError, sqlite3.Error):
+        LOGGER.exception("Unable to read network interface history")
+        raise HTTPException(status_code=503, detail="Network history is temporarily unavailable.")
+
+
+@app.get("/api/network/diagnostics")
+def network_diagnostics(
+    host: str = Query(min_length=1, max_length=253),
+    port: int = Query(default=443, ge=1, le=65535),
+    attempts: int = Query(default=3, ge=1, le=3),
+) -> dict[str, Any]:
+    """Run a user-requested DNS + TCP handshake probe. No application payload is sent."""
+    try:
+        return diagnose_tcp_connectivity(host, port, attempts=attempts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/processes")
@@ -506,6 +607,31 @@ def compare_processes(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.get("/api/analytics")
+def get_analytics(
+    window: str = Query(default="24h"),
+    compare_previous: bool = Query(default=False),
+    bucket_seconds: int | None = Query(default=None, ge=60, le=86400),
+) -> dict[str, Any]:
+    if window not in WINDOW_SECONDS:
+        raise HTTPException(status_code=400, detail="Unsupported analytics window.")
+    default_buckets = {
+        "5m": 60, "15m": 60, "1h": 300, "6h": 900,
+        "24h": 3600, "7d": 21600, "30d": 86400,
+    }
+    try:
+        history = TELEMETRY_STORE.get_analytics_history(window, compare_previous=compare_previous)
+        network_rows = TELEMETRY_STORE.get_network_history(window, limit_per_interface=2000)
+        events = TELEMETRY_STORE.get_events(window, limit=2000)
+        return build_analytics_report(
+            history["current"], history["previous"], network_rows, events,
+            window=window, bucket_seconds=bucket_seconds or default_buckets[window],
+        )
+    except (OSError, RuntimeError, ValueError, sqlite3.Error):
+        LOGGER.exception("Unable to build historical analytics")
+        raise HTTPException(status_code=503, detail="Historical analytics are temporarily unavailable.")
 
 
 @app.get("/api/history")

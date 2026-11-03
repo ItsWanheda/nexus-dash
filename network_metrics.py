@@ -293,19 +293,21 @@ def diagnose_tcp_connectivity(host: str, port: int = 443, *, attempts: int = 3) 
 
 def build_network_history_points(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Turn stored counters into rate and error-delta points; counter resets become null."""
-    previous: dict[str, Any] | None = None
+    previous: dict[str, dict[str, Any]] = {}
     output: list[dict[str, Any]] = []
     for row in rows:
         point = dict(row)
-        if previous and previous.get("interface_name") == row.get("interface_name"):
-            elapsed = float(row["sampled_epoch"]) - float(previous["sampled_epoch"])
+        name = str(row.get("interface_name") or "")
+        prior = previous.get(name)
+        if prior:
+            elapsed = float(row["sampled_epoch"]) - float(prior["sampled_epoch"])
             for source, target in (
                 ("bytes_sent", "sent_bytes_per_sec"), ("bytes_recv", "received_bytes_per_sec"),
                 ("packets_sent", "sent_packets_per_sec"), ("packets_recv", "received_packets_per_sec"),
                 ("errors_in", "errors_in_delta"), ("errors_out", "errors_out_delta"),
                 ("drops_in", "drops_in_delta"), ("drops_out", "drops_out_delta"),
             ):
-                delta = _safe_delta(row.get(source), previous.get(source))
+                delta = _safe_delta(row.get(source), prior.get(source))
                 point[target] = (
                     round(delta / elapsed, 2)
                     if source.startswith(("bytes_", "packets_")) and delta is not None and elapsed > 0
@@ -317,5 +319,5 @@ def build_network_history_points(rows: list[dict[str, Any]]) -> list[dict[str, A
                            "drops_in_delta", "drops_out_delta"):
                 point[target] = None
         output.append(point)
-        previous = row
+        previous[name] = row
     return output

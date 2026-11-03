@@ -265,21 +265,29 @@ def build_analytics_report(
     }
 
     cpu, memory = current_metrics["cpu_percent"], current_metrics["ram_percent"]
-    storage_count = sum(
-        1 for item in current_samples
-        if item.get("disk_activity_percent") is not None or item.get("disk_latency_ms") is not None
+    activity_metric = current_metrics["disk_activity_percent"]
+    latency_metric = current_metrics["disk_latency_ms"]
+    storage_count = max(int(activity_metric["count"]), int(latency_metric["count"]))
+    storage_above = max(int(activity_metric["above_threshold"]), int(latency_metric["above_threshold"]))
+    storage_ratio = max(
+        float(activity_metric["above_threshold_percent"] or 0),
+        float(latency_metric["above_threshold_percent"] or 0),
     )
-    storage_above = sum(
-        1 for item in current_samples
-        if (_number(item.get("disk_activity_percent")) or 0) >= 90
-        or (_number(item.get("disk_latency_ms")) or 0) >= 50
-    )
+    if storage_count < 3:
+        storage_status = "insufficient-data"
+    elif storage_above == 0:
+        storage_status = "no-sustained-pressure"
+    elif storage_ratio >= 50:
+        storage_status = "sustained-pressure"
+    else:
+        storage_status = "intermittent-pressure"
     network_errors = network_current["error_delta_count"] + network_current["drop_delta_count"]
+    non_loopback_rows = [row for row in network_rows if not bool(row.get("is_loopback"))]
     network_card = {
         "key": "network", "title": "Network stability",
-        "status": "insufficient-data" if network_current["sample_count"] < 3 else
+        "status": "insufficient-data" if len(non_loopback_rows) < 3 else
                   ("intermittent-pressure" if network_errors else "no-observed-errors"),
-        "samples": network_current["sample_count"], "errors": network_current["error_delta_count"],
+        "samples": len(non_loopback_rows), "errors": network_current["error_delta_count"],
         "drops": network_current["drop_delta_count"], "link_up_percent": network_current["link_up_percent"],
     }
     categories = Counter(str(event.get("category") or "system") for event in events)
@@ -300,11 +308,11 @@ def build_analytics_report(
         "scorecards": [
             _scorecard("cpu", "CPU pressure", cpu, 85.0),
             _scorecard("memory", "Memory pressure", memory, 85.0),
-            _scorecard("storage", "Storage performance", {
-                "count": storage_count, "above_threshold": storage_above,
-                "above_threshold_percent": round(storage_above / storage_count * 100, 2) if storage_count else None,
-                "average": None, "p95": None, "maximum": None,
-            }, 90.0),
+            {
+                "key": "storage", "title": "Storage performance", "status": storage_status,
+                "samples": storage_count, "activity": activity_metric, "latency": latency_metric,
+                "samples_above_threshold": storage_above, "above_threshold_percent": storage_ratio,
+            },
             network_card,
             {"key": "thermal", "title": "Thermal conditions", "status": "not-recorded",
              "samples": 0, "note": "Temperature readings are currently live-only; historical thermal sampling is not enabled."},
