@@ -231,3 +231,69 @@ def test_pci_address_matching_normalises_nvml_domain_padding():
 
     assert _pci_address_key("00000000:65:00.0") == "0000:65:00.0"
     assert _pci_address_key("0000:65:00.0") == "0000:65:00.0"
+
+
+def test_windows_gpu_luid_normalization():
+    from nexus_dash.services.windows_gpu import windows_gpu_luid_key
+
+    assert windows_gpu_luid_key("luid_0x00000000_0x0000abcd_phys_0_eng_0") == "00000000:0000abcd"
+    assert windows_gpu_luid_key("00000000:0000ABCD") == "00000000:0000abcd"
+    assert windows_gpu_luid_key("not-a-luid") is None
+
+
+def test_windows_dxgi_inventory_is_safe_off_windows(monkeypatch):
+    from nexus_dash.services import windows_gpu
+
+    monkeypatch.setattr(windows_gpu.platform, "system", lambda: "Linux")
+    assert windows_gpu.collect_windows_dxgi_inventory() == []
+
+
+def test_windows_dxgi_and_wmi_inventory_merge_exact_adapter_identity():
+    from nexus_dash.services.hardware_providers import _merge_windows_gpu_inventory
+
+    dxgi = [{
+        "name": "AMD Radeon Graphics",
+        "vendor_id": "1002", "device_id": "747e",
+        "subsystem_vendor_id": "1462", "subsystem_device_id": "0b36",
+        "adapter_luid": "00000000:0000abcd",
+        "dedicated_video_memory_gb": 16.0,
+    }]
+    wmi = [{
+        "name": "AMD Radeon RX 7800 XT",
+        "vendor_id": "1002", "device_id": "747e",
+        "subsystem_vendor_id": "1462", "subsystem_device_id": "0b36",
+        "driver_version": "32.0.1", "video_processor": "AMD Radeon RX 7800 XT",
+    }]
+
+    result = _merge_windows_gpu_inventory(dxgi, wmi)
+
+    assert len(result) == 1
+    assert result[0]["name"] == "AMD Radeon RX 7800 XT"
+    assert result[0]["adapter_luid"] == "00000000:0000abcd"
+    assert result[0]["dedicated_video_memory_gb"] == 16.0
+    assert result[0]["driver_version"] == "32.0.1"
+
+
+def test_windows_gpu_performance_counters_group_by_luid(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from nexus_dash.services import hardware_providers
+
+    engine_rows = [
+        SimpleNamespace(Name="pid_10_luid_0x00000000_0x0000abcd_phys_0_eng_0", UtilizationPercentage=31),
+        SimpleNamespace(Name="pid_11_luid_0x00000000_0x0000abcd_phys_0_eng_1", UtilizationPercentage=72),
+    ]
+    memory_rows = [
+        SimpleNamespace(Name="luid_0x00000000_0x0000abcd_phys_0", DedicatedUsage=2 * 1024**3, SharedUsage=256 * 1024**2),
+    ]
+    cim = SimpleNamespace(
+        Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine=lambda: engine_rows,
+        Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory=lambda: memory_rows,
+    )
+    monkeypatch.setattr(hardware_providers.platform, "system", lambda: "Windows")
+    monkeypatch.setitem(sys.modules, "wmi", SimpleNamespace(WMI=lambda **kwargs: cim))
+
+    metrics = hardware_providers.collect_windows_gpu_performance_metrics()
+    assert metrics["00000000:0000abcd"]["utilization_percent"] == 72
+    assert metrics["00000000:0000abcd"]["memory_used_gb"] == 2
+    assert metrics["00000000:0000abcd"]["shared_memory_used_gb"] == 0.25

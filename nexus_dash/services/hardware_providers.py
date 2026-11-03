@@ -208,7 +208,7 @@ def _windows_wmi_gpu_inventory() -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     try:
         import wmi
-        rows = wmi.WMI(namespace=r"root\\cimv2").Win32_VideoController()
+        rows = wmi.WMI(namespace=r"root\cimv2").Win32_VideoController()
         for row in list(rows)[:32]:
             name = str(getattr(row, "Name", "") or "Display adapter")[:160]
             vendor_text = str(getattr(row, "AdapterCompatibility", "") or "")
@@ -281,7 +281,7 @@ def collect_windows_gpu_performance_metrics() -> dict[str, dict[str, Any]]:
         return {}
     try:
         import wmi
-        cim = wmi.WMI(namespace=r"root\\cimv2")
+        cim = wmi.WMI(namespace=r"root\cimv2")
     except Exception:
         return {}
     output: dict[str, dict[str, Any]] = {}
