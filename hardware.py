@@ -53,58 +53,60 @@ def _sensor_data() -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dic
     except (AttributeError, NotImplementedError, OSError, psutil.Error):
         providers = {}
     for chip, entries in providers.items():
-        chip_name = str(chip)[:100]
         for entry in entries or []:
             current = _finite(getattr(entry, "current", None))
             if current is None:
                 continue
-            label = str(getattr(entry, "label", "") or chip_name)[:120]
-            item = {
-                "provider": chip_name,
-                "label": label,
-                "current_c": round(current, 1),
-                "high_c": _finite(getattr(entry, "high", None)),
-                "critical_c": _finite(getattr(entry, "critical", None)),
-            }
-            target = cpu_temperatures if any(
-                token in (chip_name + " " + label).casefold()
-                for token in ("cpu", "coretemp", "k10temp", "zenpower", "package")
-            ) else board_temperatures
-            target.append(item)
+            label = str(getattr(entry, "label", "") or chip)[:120]
+            chip_name = str(chip)[:100]
+            row = {"provider": chip_name, "label": label, "current_c": round(current, 1),
+                   "high_c": _finite(getattr(entry, "high", None)),
+                   "critical_c": _finite(getattr(entry, "critical", None))}
+            target = cpu_temperatures if any(token in (chip_name + " " + label).casefold()
+                for token in ("cpu", "coretemp", "k10temp", "zenpower", "package")) else board_temperatures
+            target.append(row)
     try:
-        provider_fans = psutil.sensors_fans() or {}
+        fan_providers = psutil.sensors_fans() or {}
     except (AttributeError, NotImplementedError, OSError, psutil.Error):
-        provider_fans = {}
-    for chip, entries in provider_fans.items():
+        fan_providers = {}
+    for chip, entries in fan_providers.items():
         for entry in entries or []:
             rpm = _finite(getattr(entry, "current", None))
             if rpm is not None:
-                fans.append({
-                    "provider": str(chip)[:100],
-                    "label": str(getattr(entry, "label", "") or chip)[:120],
-                    "rpm": round(rpm, 1),
-                })
+                fans.append({"provider": str(chip)[:100],
+                             "label": str(getattr(entry, "label", "") or chip)[:120],
+                             "rpm": round(rpm, 1)})
+    for sensor in collect_lhm_sensors():
+        group = (sensor["hardware_type"] + " " + sensor["hardware"]).casefold()
+        if sensor["type"] == "Temperature":
+            row = {"provider": "LibreHardwareMonitor WMI", "label": sensor["name"],
+                   "current_c": round(sensor["value"], 1), "high_c": None, "critical_c": None}
+            (cpu_temperatures if "cpu" in group else board_temperatures).append(row)
+        elif sensor["type"] == "Fan" and 0 <= sensor["value"] <= 100000:
+            fans.append({"provider": "LibreHardwareMonitor WMI", "label": sensor["name"],
+                         "rpm": round(sensor["value"], 1)})
+    hwmon = collect_linux_hwmon()
+    if not board_temperatures:
+        board_temperatures.extend(hwmon["temperatures"])
+    if not fans:
+        fans.extend(hwmon["fans"])
     if platform.system() == "Windows" and not board_temperatures:
         try:
-            import wmi  # optional: requirements-hardware.txt
-            connection = wmi.WMI(namespace=r"root\wmi")
+            import wmi
+            connection = wmi.WMI(namespace=r"root\\wmi")
             for zone in connection.MSAcpi_ThermalZoneTemperature():
                 raw = _finite(getattr(zone, "CurrentTemperature", None))
                 if raw is None or raw <= 0:
                     continue
                 celsius = raw / 10.0 - 273.15
                 if -40 <= celsius <= 150:
-                    board_temperatures.append({
-                        "provider": "Windows ACPI WMI",
-                        "label": "ACPI thermal zone",
-                        "current_c": round(celsius, 1),
-                        "high_c": None,
-                        "critical_c": None,
-                    })
+                    board_temperatures.append({"provider": "Windows ACPI WMI", "label": "ACPI thermal zone",
+                                                "current_c": round(celsius, 1), "high_c": None, "critical_c": None})
         except Exception:
-            # WMI thermal zones are optional and often absent on modern systems.
             pass
-    return cpu_temperatures, board_temperatures, fans
+    return cpu_temperatures[:128], board_temperatures[:128], fans[:128]
+
+
 
 
 def _memory_pressure(percent: float) -> dict[str, Any]:
@@ -141,81 +143,68 @@ def _memory_pressure(percent: float) -> dict[str, Any]:
 
 def _gpu_devices() -> list[dict[str, Any]]:
     global _NVML_READY
+    devices: list[dict[str, Any]] = []
     try:
         import pynvml
-    except ImportError:
-        return []
-    try:
         with _NVML_LOCK:
             if not _NVML_READY:
                 pynvml.nvmlInit()
                 _NVML_READY = True
-        count = int(pynvml.nvmlDeviceGetCount())
+        for index in range(min(max(int(pynvml.nvmlDeviceGetCount()), 0), 16)):
+            try:
+                handle = pynvml.nvmlDeviceGetHandleByIndex(index)
+                raw_name = pynvml.nvmlDeviceGetName(handle)
+                name = raw_name.decode("utf-8", "replace") if isinstance(raw_name, bytes) else str(raw_name)
+                def query(call):
+                    try:
+                        return call()
+                    except Exception:
+                        return None
+                utilization = query(lambda: pynvml.nvmlDeviceGetUtilizationRates(handle))
+                memory = query(lambda: pynvml.nvmlDeviceGetMemoryInfo(handle))
+                power_mw = query(lambda: pynvml.nvmlDeviceGetPowerUsage(handle))
+                devices.append({
+                    "index": index, "name": name[:160], "vendor": "NVIDIA", "status": "Available",
+                    "utilization_percent": _reading(getattr(utilization, "gpu", None), "%", "NVIDIA NVML"),
+                    "memory_utilization_percent": _reading(getattr(utilization, "memory", None), "%", "NVIDIA NVML"),
+                    "memory_used_gb": _reading(memory.used / (1024 ** 3) if memory else None, "GiB", "NVIDIA NVML"),
+                    "memory_total_gb": _reading(memory.total / (1024 ** 3) if memory else None, "GiB", "NVIDIA NVML"),
+                    "temperature_c": _reading(query(lambda: pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)), "°C", "NVIDIA NVML"),
+                    "power_w": _reading(power_mw / 1000 if power_mw is not None else None, "W", "NVIDIA NVML"),
+                    "graphics_clock_mhz": _reading(query(lambda: pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_GRAPHICS)), "MHz", "NVIDIA NVML"),
+                    "memory_clock_mhz": _reading(query(lambda: pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_MEM)), "MHz", "NVIDIA NVML"),
+                    "fan_percent": _reading(query(lambda: pynvml.nvmlDeviceGetFanSpeed(handle)), "%", "NVIDIA NVML"),
+                })
+            except Exception as exc:
+                devices.append({"index": index, "name": f"NVIDIA GPU {index}", "vendor": "NVIDIA",
+                                "status": "Unavailable", "reason": str(exc)[:240]})
     except Exception:
-        return []
-    devices: list[dict[str, Any]] = []
-    for index in range(min(max(count, 0), 16)):
-        try:
-            handle = pynvml.nvmlDeviceGetHandleByIndex(index)
-            raw_name = pynvml.nvmlDeviceGetName(handle)
-            name = raw_name.decode("utf-8", "replace") if isinstance(raw_name, bytes) else str(raw_name)
-            try:
-                utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
-                gpu_util = _reading(getattr(utilization, "gpu", None), "%", "NVIDIA NVML")
-                memory_util = _reading(getattr(utilization, "memory", None), "%", "NVIDIA NVML")
-            except Exception:
-                gpu_util = _unavailable("NVML utilisation counters are unavailable.", "%")
-                memory_util = _unavailable("NVML utilisation counters are unavailable.", "%")
-            try:
-                memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                used = memory.used / (1024 ** 3)
-                total = memory.total / (1024 ** 3)
-            except Exception:
-                used = total = None
-            try:
-                temperature = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
-            except Exception:
-                temperature = None
-            try:
-                power = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0
-            except Exception:
-                power = None
-            try:
-                graphics_clock = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_GRAPHICS)
-            except Exception:
-                graphics_clock = None
-            try:
-                memory_clock = pynvml.nvmlDeviceGetClockInfo(handle, pynvml.NVML_CLOCK_MEM)
-            except Exception:
-                memory_clock = None
-            try:
-                fan = pynvml.nvmlDeviceGetFanSpeed(handle)
-            except Exception:
-                fan = None
-            devices.append({
-                "index": index,
-                "name": name[:160],
-                "vendor": "NVIDIA",
-                "utilization_percent": gpu_util,
-                "memory_utilization_percent": memory_util,
-                "memory_used_gb": _reading(used, "GiB", "NVIDIA NVML"),
-                "memory_total_gb": _reading(total, "GiB", "NVIDIA NVML"),
-                "temperature_c": _reading(temperature, "°C", "NVIDIA NVML"),
-                "power_w": _reading(power, "W", "NVIDIA NVML"),
-                "graphics_clock_mhz": _reading(graphics_clock, "MHz", "NVIDIA NVML"),
-                "memory_clock_mhz": _reading(memory_clock, "MHz", "NVIDIA NVML"),
-                "fan_percent": _reading(fan, "%", "NVIDIA NVML"),
-                "status": "Available",
-            })
-        except Exception:
-            devices.append({
-                "index": index,
-                "name": f"NVIDIA GPU {index}",
-                "vendor": "NVIDIA",
-                "status": "Unavailable",
-                "reason": "The NVML device could not be queried.",
-            })
-    return devices
+        pass
+    devices.extend(collect_amd_smi_devices())
+    inventory = collect_gpu_inventory()
+    live_vendors = {str(item.get("vendor", "")).casefold() for item in devices if item.get("status") == "Available"}
+    for item in inventory:
+        vendor = str(item.get("vendor", "Unknown"))
+        if vendor.casefold() in live_vendors:
+            continue
+        devices.append({
+            "index": len(devices), "name": item.get("name") or "GPU device", "vendor": vendor,
+            "status": "Inventory only", "device_id": item.get("device_id"),
+            "driver_version": item.get("driver_version"),
+            "reason": "The device is identified, but no compatible live telemetry provider exposed sensor readings.",
+            "utilization_percent": _unavailable("No compatible GPU utilisation provider.", "%"),
+            "memory_utilization_percent": _unavailable("No compatible GPU memory provider.", "%"),
+            "memory_used_gb": _unavailable("No compatible GPU memory provider.", "GiB"),
+            "memory_total_gb": _unavailable("No compatible GPU memory provider.", "GiB"),
+            "temperature_c": _unavailable("No compatible GPU temperature provider.", "°C"),
+            "power_w": _unavailable("No compatible GPU power provider.", "W"),
+            "graphics_clock_mhz": _unavailable("No compatible GPU clock provider.", "MHz"),
+            "memory_clock_mhz": _unavailable("No compatible GPU clock provider.", "MHz"),
+            "fan_percent": _unavailable("No compatible GPU fan provider.", "%"),
+        })
+    return devices[:16]
+
+
 
 
 def _battery() -> dict[str, Any]:
@@ -332,9 +321,11 @@ def collect_hardware() -> dict[str, Any]:
     cpu_temperature_status = "Available" if cpu_temperatures else "Unavailable"
     board_temperature_status = "Available" if board_temperatures else "Unavailable"
     fan_status = "Available" if fans else "Unavailable"
+    inventory = collect_system_inventory()
     return {
         "sampled_at": now,
         "platform": {"system": platform.system(), "release": platform.release(), "machine": platform.machine()},
+        "system": inventory["system"],
         "platform_adapter": _platform_adapter(),
         "cpu": {
             "model": platform.processor() or "Unavailable",
@@ -358,6 +349,9 @@ def collect_hardware() -> dict[str, Any]:
         },
         "memory": ram,
         "motherboard": {
+            "identity": inventory["motherboard"],
+            "bios": inventory["bios"],
+            "identity_source": inventory["source"],
             "temperatures": {
                 "status": board_temperature_status,
                 "unit": "°C",
@@ -374,7 +368,11 @@ def collect_hardware() -> dict[str, Any]:
         "battery": _battery(),
         "capabilities": {
             "psutil_sensors": "Available" if cpu_temperatures or board_temperatures or fans else "Unavailable",
-            "nvidia_nvml": "Available" if gpu else "Unavailable",
+            "nvidia_nvml": "Available" if any(item.get("vendor") == "NVIDIA" and item.get("status") == "Available" for item in gpu) else "Unavailable",
+            "amd_smi": "Available" if any(item.get("vendor") == "AMD" and item.get("status") == "Available" for item in gpu) else "Unavailable (AMD GPU inventory may still be detected)",
+            "gpu_inventory": "Available" if gpu else "Unavailable",
+            "smbios_identity": "Available" if inventory["motherboard"].get("model") or inventory["system"].get("model") else "Unavailable",
+            "libre_hardware_monitor": "Available" if collect_lhm_sensors() else "Not running or unavailable",
             "windows_wmi": "Optional; install requirements-hardware.txt for ACPI thermal-zone support on Windows.",
         },
     }
