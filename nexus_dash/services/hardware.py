@@ -154,7 +154,7 @@ def _memory_pressure(percent: float) -> dict[str, Any]:
 
 
 _GPU_METRIC_FIELDS = (
-    "utilization_percent", "memory_utilization_percent", "memory_used_gb", "memory_total_gb",
+    "utilization_percent", "memory_utilization_percent", "memory_used_gb", "memory_total_gb", "shared_memory_used_gb",
     "temperature_c", "power_w", "graphics_clock_mhz", "memory_clock_mhz", "fan_percent", "fan_rpm",
 )
 _GPU_CACHE_LOCK = threading.Lock()
@@ -385,6 +385,9 @@ def _apply_windows_gpu_metrics(devices: list[dict[str, Any]]) -> None:
         value = row.get("utilization_percent")
         if value is not None and 0 <= value <= 100:
             device["utilization_percent"] = _reading(value, "%", "Windows GPU Engine counters")
+        shared_used = row.get("shared_memory_used_gb")
+        if shared_used is not None and shared_used >= 0:
+            device["shared_memory_used_gb"] = _reading(shared_used, "GiB", "Windows GPU AdapterMemory counters")
         used = row.get("memory_used_gb")
         if used is not None and used >= 0:
             device["memory_used_gb"] = _reading(used, "GiB", "Windows GPU AdapterMemory counters")

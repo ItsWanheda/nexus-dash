@@ -297,3 +297,24 @@ def test_windows_gpu_performance_counters_group_by_luid(monkeypatch):
     assert metrics["00000000:0000abcd"]["utilization_percent"] == 72
     assert metrics["00000000:0000abcd"]["memory_used_gb"] == 2
     assert metrics["00000000:0000abcd"]["shared_memory_used_gb"] == 0.25
+
+
+def test_windows_gpu_inventory_row_keeps_dxgi_identity_and_memory():
+    from nexus_dash.services.hardware import _gpu_inventory_row
+
+    row = _gpu_inventory_row({
+        "name": "AMD Radeon RX 7800 XT", "vendor": "AMD",
+        "vendor_id": "1002", "device_id": "747e",
+        "subsystem_vendor_id": "1462", "subsystem_device_id": "0b36",
+        "adapter_luid": "00000000:0000abcd",
+        "dedicated_video_memory_gb": 16.0, "shared_system_memory_gb": 8.0,
+        "driver_version": "32.0.1",
+    }, 0)
+
+    assert row["vendor_id"] == "1002"
+    assert row["device_id"] == "747e"
+    assert row["subsystem_vendor_id"] == "1462"
+    assert row["adapter_luid"] == "00000000:0000abcd"
+    assert row["dedicated_video_memory_gb"] == 16.0
+    assert row["shared_system_memory_gb"] == 8.0
+    assert row["shared_memory_used_gb"]["status"] == "Unavailable"
