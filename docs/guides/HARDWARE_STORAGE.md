@@ -13,13 +13,23 @@ NEXUS reports local hardware identity and sensor values on a best-effort basis. 
 
 ## 🎮 GPU identification and live metrics
 
-| Vendor | Inventory source | Optional live metrics |
-| --- | --- | --- |
-| NVIDIA | Windows WMI / Linux PCI identifiers | NVML: utilisation, memory, temperature, power, clocks and fan values where supported |
-| AMD | Windows WMI / Linux PCI identifiers | AMD SMI on supported Linux AMDGPU/ROCm systems: engine, VRAM, power, clocks, temperature and fan RPM where exposed |
-| Intel | Windows WMI / Linux PCI identifiers | Separate compatible provider required for live sensor support |
+NEXUS discovers display adapters independently of their live sensor providers. It does **not** assume the system uses NVIDIA hardware, and it does not stop enumerating a vendor after finding the first card.
 
-On Linux, NEXUS can look up legacy PCI device identifiers in a locally installed `pci.ids` database. If a device is recognised but no live metric provider is available, the UI labels it **Inventory only** instead of omitting it or inventing a value.
+| Platform | Inventory source | Additional live telemetry |
+| --- | --- | --- |
+| Windows | WMI `Win32_VideoController`, with Windows PCI device-registry fallback | NVIDIA NVML where supported; LibreHardwareMonitor WMI readings for supported AMD, NVIDIA and Intel devices |
+| Linux | All PCI display-class devices from `/sys/bus/pci/devices`; vendor/device names from local `pci.ids` when installed | Generic DRM/sysfs counters (driver-dependent); AMD SMI on supported AMDGPU/ROCm systems; NVIDIA NVML |
+| macOS | Built-in `system_profiler SPDisplaysDataType -json` inventory | Values exposed by the operating system or a compatible installed provider |
+
+Known PCI vendor identifiers are labelled as AMD, NVIDIA, Intel, Apple, or their respective platform/vendor names. Other valid PCI identifiers are resolved from the local `pci.ids` database when possible; otherwise NEXUS preserves a generic PCI vendor label and still shows the device entry.
+
+GPU **identification** and **live measurements** are separate:
+- An identified device remains visible as **Inventory only** when a driver/provider does not expose live readings.
+- When available, Linux DRM/sysfs counters can expose GPU busy percentage, VRAM use/capacity, temperature, power, clock and fan readings.
+- AMD SMI provides additional readings on supported Linux AMDGPU/ROCm systems. AMD SMI is not required for AMD device identification.
+- NVIDIA NVML provides additional NVIDIA measurements when its driver and Python binding are available.
+- On Windows, LibreHardwareMonitor can provide supported per-device load, temperature, power, clock, fan and memory readings across multiple GPU vendors. Matchable sensor names are attached to the corresponding adapter rather than being reported as a separate GPU.
+- Multiple adapters from the same vendor are retained. Live readings are merged by PCI address/device identity or an unambiguous model match, never by vendor name alone.
 
 Install optional Python bindings:
 
@@ -27,7 +37,7 @@ Install optional Python bindings:
 python -m pip install -r requirements-hardware.txt
 ```
 
-The host still needs a compatible vendor driver/runtime. Missing or unsupported readings remain unavailable.
+> ℹ️ Installing an optional Python package does not install a GPU driver, enable an unsupported sensor, or guarantee live values. Device names and capabilities depend on what the operating system and drivers expose. If the GPU is detected but a specific field is unavailable, NEXUS reports that field as unavailable instead of guessing.
 
 ## 🖥️ System, motherboard and BIOS identity
 
@@ -44,7 +54,7 @@ Firmware may report generic strings or leave fields blank. NEXUS shows firmware-
 - psutil sensor APIs report temperatures/fan RPM where supported.
 - Linux also reads kernel hwmon `temp*_input` and `fan*_input` values where drivers publish them.
 - Windows can read ACPI thermal zones through WMI.
-- For expanded Windows motherboard/GPU/fan sensors, run LibreHardwareMonitor with its WMI sensor provider enabled; NEXUS reads its `root\\LibreHardwareMonitor` namespace.
+- For expanded Windows motherboard/GPU/fan sensors, run LibreHardwareMonitor with its WMI sensor provider enabled; NEXUS reads its `root\\LibreHardwareMonitor` namespace and associates supported GPU sensors with detected display adapters.
 - AMD SMI and NVIDIA NVML may expose GPU fan/temperature values for supported devices.
 
 > ⚠️ **Read-only:** NEXUS does not set fan curves, write hwmon control attributes, change BIOS settings or override vendor fan controllers. A missing RPM value is unavailable — not zero RPM.
@@ -64,9 +74,9 @@ Install the operating-system smartmontools package so `smartctl` is available. R
 
 | Platform | Identification | Optional live sensor providers |
 | --- | --- | --- |
-| Windows | WMI system/baseboard/BIOS and AMD/NVIDIA/Intel display controller IDs | NVML for NVIDIA; LibreHardwareMonitor WMI for supported temperatures/fans; ACPI thermal zones; optional SMART |
-| Linux | SMBIOS/DMI and PCI vendor/device IDs, including local pci.ids lookup | AMD SMI on supported AMDGPU/ROCm; NVML for NVIDIA; psutil/kernel hwmon temperatures and fan tachometers; optional SMART |
-| macOS | Platform model; conventional baseboard identification is generally unavailable | psutil sensors where exposed; GPU/fan coverage depends on hardware/provider; optional SMART |
+| Windows | WMI plus PCI device-registry fallback for display adapters; WMI for system/baseboard/BIOS | NVML for NVIDIA; LibreHardwareMonitor WMI for supported GPU/board sensors; ACPI thermal zones; optional SMART |
+| Linux | SMBIOS/DMI and all PCI display-class devices, including local pci.ids vendor/device lookup | DRM/sysfs counters where exposed; AMD SMI on supported AMDGPU/ROCm; NVML for NVIDIA; kernel hwmon temperatures/fans; optional SMART |
+| macOS | Built-in system_profiler display-adapter inventory; conventional baseboard identification is generally unavailable | GPU/fan metrics depend on OS/provider exposure; psutil sensors; optional SMART |
 
 A missing sensor is not evidence that hardware is healthy. A generic firmware model string may be the exact value the firmware publishes.
 

@@ -4,6 +4,15 @@ All notable changes to NEXUS-DASH are recorded here. Unreleased changes are part
 
 ## [Unreleased]
 
+### Fixed — Vendor-neutral GPU discovery and telemetry
+- Removed NVIDIA-specific empty-state messaging and the NVIDIA-only dashboard memory summary; dashboard GPU memory now aggregates values exposed by all detected adapters.
+- Expanded GPU inventory to enumerate every Linux PCI display-class device, Windows WMI plus display-class registry fallback, and macOS system_profiler results, including adapters from vendors beyond AMD/NVIDIA/Intel.
+- Added generic Linux DRM/sysfs GPU busy, VRAM, hwmon temperature, power, clock and fan readings wherever the active driver exposes them.
+- Added PCI bus identity to AMD SMI telemetry and merged live provider readings with inventory by device identity rather than vendor name, preserving multiple GPUs from the same vendor.
+- Connected supported LibreHardwareMonitor GPU sensors to their matching device on Windows and retained inventory-only devices when live telemetry is unavailable.
+- Added regression coverage for AMD detection, multi-vendor/multi-GPU inventory, identity-based metric merging, provider-independent memory aggregation and generic UI fallbacks.
+- Updated the GPU hardware guide and README to explain platform discovery, optional providers and inventory-versus-live-metric limitations.
+
 ### Changed — Repository organization and documentation
 - Reorganized documentation into navigable guides under `docs/guides/` and architecture references under `docs/architecture/`, with a new index at `docs/README.md`.
 - Rewrote the README with a feature overview, safer setup instructions, API summary, privacy notes, documentation links and an accurate repository map.

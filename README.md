@@ -33,7 +33,7 @@ NEXUS-DASH 2.0.0 combines a dependency-light browser interface with a Python Fas
 ### 📊 Live system monitoring
 - CPU utilisation per core, available frequency and temperature sensors, RAM/cache/swap/pressure, system volumes, network counters and uptime.
 - Hardware identity from SMBIOS/DMI or Windows WMI, including system, motherboard and BIOS details where firmware exposes them.
-- AMD, NVIDIA and Intel GPU inventory. NVIDIA live telemetry uses NVML; supported Linux AMDGPU/ROCm systems may use AMD SMI.
+- Vendor-neutral GPU inventory for AMD, NVIDIA, Intel, Apple and other OS-reported display adapters. Optional vendor/platform providers add live readings when available.
 - Linux psutil/kernel hwmon readings and optional Windows LibreHardwareMonitor WMI sensors. Fan monitoring is read-only.
 - Storage throughput, IOPS, device activity/latency where supported, drive capacity, top-process I/O and optional SMART health.
 
@@ -92,7 +92,7 @@ NEXUS-DASH 2.0.0 combines a dependency-light browser interface with a Python Fas
 | Local API | Python 3.10+, FastAPI, Uvicorn |
 | OS telemetry | psutil and optional platform/vendor providers |
 | Historical storage | SQLite on the local machine |
-| Optional GPU telemetry | NVIDIA NVML / supported Linux AMD SMI |
+| Optional GPU telemetry | NVIDIA NVML, supported Linux AMD SMI, Linux DRM/sysfs and Windows LibreHardwareMonitor |
 | Desktop packaging | PyWebView, PyInstaller and Inno Setup |
 | Tests and CI | pytest, FastAPI TestClient, GitHub Actions |
 
@@ -154,7 +154,7 @@ Then open <http://127.0.0.1:5500>.
 python -m pip install -r requirements-hardware.txt
 ```
 
-This installs optional NVML, Windows WMI and Linux AMD SMI bindings. Live values still depend on compatible hardware, drivers and provider support. On Windows, LibreHardwareMonitor must be installed and its WMI sensor provider running for expanded sensor coverage. On Linux, AMD SMI requires a compatible AMDGPU/ROCm stack.
+This installs optional NVIDIA NVML, Windows WMI and Linux AMD SMI bindings. GPU inventory is also read from native OS interfaces (Windows WMI/device registry, Linux PCI sysfs and macOS system_profiler). Live values remain dependent on each device's driver and exposed sensor interfaces. Windows LibreHardwareMonitor can provide additional readings across supported GPU vendors; Linux DRM/sysfs exposes generic counters where the active driver publishes them. AMD SMI requires a compatible AMDGPU/ROCm stack.
 
 ### SMART storage health
 

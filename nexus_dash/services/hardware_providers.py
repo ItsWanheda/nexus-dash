@@ -1,8 +1,10 @@
 """Read-only, best-effort OS hardware inventory and optional sensor providers."""
 from __future__ import annotations
 
+import json
 import platform
 import re
+import subprocess
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -64,26 +66,67 @@ def collect_system_inventory() -> dict[str, Any]:
 
 
 
+_PCI_VENDOR_FALLBACKS = {
+    "1002": "AMD",
+    "10de": "NVIDIA",
+    "8086": "Intel",
+    "106b": "Apple",
+    "1022": "AMD",
+    "15ad": "VMware",
+    "80ee": "Oracle VirtualBox",
+    "1234": "QEMU",
+    "1af4": "Red Hat Virtio",
+    "1414": "Microsoft",
+    "1b36": "QEMU",
+    "1d0f": "Amazon",
+}
+_PCI_DATABASES = (
+    Path("/usr/share/hwdata/pci.ids"),
+    Path("/usr/share/misc/pci.ids"),
+    Path("/usr/share/pci.ids"),
+    Path("/var/lib/pci.ids"),
+)
+
+
+def _normalise_pci_id(value: str | None) -> str:
+    raw = str(value or "").strip().lower().removeprefix("0x")
+    return raw.zfill(4) if raw else ""
+
+
+@lru_cache(maxsize=512)
+def _pci_vendor_name(vendor_id: str) -> str:
+    """Resolve a PCI vendor name using known aliases or a local pci.ids database."""
+    vendor = _normalise_pci_id(vendor_id)
+    if not re.fullmatch(r"[0-9a-f]{4}", vendor):
+        return "Unknown"
+    known = _PCI_VENDOR_FALLBACKS.get(vendor)
+    if known:
+        return known
+    for database in _PCI_DATABASES:
+        try:
+            for line in database.read_text(encoding="utf-8", errors="replace").splitlines():
+                if not line or line.startswith(("#", "\t")):
+                    continue
+                match = re.match(r"^([0-9a-fA-F]{4})\s+(.+)$", line)
+                if match and match.group(1).lower() == vendor:
+                    return match.group(2).strip()[:100]
+        except OSError:
+            continue
+    return f"PCI vendor {vendor.upper()}"
+
+
 @lru_cache(maxsize=512)
 def _pci_device_name(vendor_id: str, device_id: str) -> str | None:
-    """Resolve marketing/device labels from locally installed pci.ids databases."""
-    vendor = str(vendor_id or "").lower().removeprefix("0x").zfill(4)
-    device = str(device_id or "").lower().removeprefix("0x").zfill(4)
+    """Resolve a device label from locally installed pci.ids databases."""
+    vendor = _normalise_pci_id(vendor_id)
+    device = _normalise_pci_id(device_id)
     if not re.fullmatch(r"[0-9a-f]{4}", vendor) or not re.fullmatch(r"[0-9a-f]{4}", device):
         return None
-    candidates = (
-        Path("/usr/share/hwdata/pci.ids"),
-        Path("/usr/share/misc/pci.ids"),
-        Path("/usr/share/pci.ids"),
-        Path("/var/lib/pci.ids"),
-    )
-    for database in candidates:
+    for database in _PCI_DATABASES:
         try:
             current_vendor = None
             for line in database.read_text(encoding="utf-8", errors="replace").splitlines():
-                if not line or line.startswith("#"):
-                    continue
-                if line.startswith("\t\t"):
+                if not line or line.startswith("#") or line.startswith("\t\t"):
                     continue
                 if line.startswith("\t"):
                     match = re.match(r"^\t([0-9a-fA-F]{4})\s+(.+)$", line)
@@ -97,56 +140,304 @@ def _pci_device_name(vendor_id: str, device_id: str) -> str | None:
     return None
 
 
-def collect_gpu_inventory() -> list[dict[str, Any]]:
+def _classify_gpu_vendor(vendor_id: str | None, vendor_text: str = "", name: str = "") -> str:
+    """Return a vendor label without assuming that every adapter is NVIDIA/AMD/Intel."""
+    code = _normalise_pci_id(vendor_id)
+    known = _PCI_VENDOR_FALLBACKS.get(code)
+    if known:
+        return known
+    text = f"{vendor_text} {name}".casefold()
+    if any(token in text for token in ("advanced micro", "amd", "radeon", "ati technologies")):
+        return "AMD"
+    if any(token in text for token in ("nvidia", "geforce", "quadro", "tesla")):
+        return "NVIDIA"
+    if any(token in text for token in ("intel", "iris", "arc graphics", "uhd graphics")):
+        return "Intel"
+    if "apple" in text:
+        return "Apple"
+    if vendor_text.strip():
+        return vendor_text.strip()[:100]
+    if code and re.fullmatch(r"[0-9a-f]{4}", code):
+        return _pci_vendor_name(code)
+    return "Unknown"
+
+
+def _linux_gpu_inventory(root: Path | None = None) -> list[dict[str, Any]]:
+    """Enumerate every PCI display-class device, not only three hard-coded vendors."""
+    devices_root = root or Path("/sys/bus/pci/devices")
     output: list[dict[str, Any]] = []
-    if platform.system() == "Linux":
-        root = Path("/sys/bus/pci/devices")
-        vendors = {"0x1002": "AMD", "0x10de": "NVIDIA", "0x8086": "Intel"}
+    try:
+        devices = sorted(devices_root.glob("*"))
+    except OSError:
+        devices = []
+    for device in devices:
+        vendor_id = _read(device / "vendor")
+        class_id = _read(device / "class")
+        if not class_id or not class_id.lower().startswith("0x03"):
+            continue
+        device_id = _read(device / "device")
+        vendor = _classify_gpu_vendor(vendor_id)
+        model = _read(device / "product_name") or _read(device / "label")
+        if not model and vendor_id and device_id:
+            model = _pci_device_name(vendor_id, device_id)
+        driver = None
         try:
-            devices = sorted(root.glob("*"))
+            driver = (device / "driver").resolve().name
         except OSError:
-            devices = []
-        for device in devices:
-            vendor_id = _read(device / "vendor")
-            class_id = _read(device / "class")
-            if vendor_id not in vendors or not class_id or not class_id.startswith("0x03"):
-                continue
-            vendor = vendors[vendor_id]
-            product_id = _read(device / "device") or "unknown"
-            model = _read(device / "product_name") or _read(device / "label")
-            model = model or _pci_device_name(vendor_id, product_id)
-            output.append({
-                "name": model or f"{vendor} PCI graphics device {product_id}",
-                "vendor": vendor, "device_id": product_id, "pci_address": device.name,
-                "inventory_status": "Detected",
-            })
-    elif platform.system() == "Windows":
-        try:
-            import wmi
-            rows = wmi.WMI(namespace=r"root\cimv2").Win32_VideoController()
-            for row in list(rows)[:16]:
-                name = str(getattr(row, "Name", "") or "Unknown GPU")[:160]
-                vendor_text = str(getattr(row, "AdapterCompatibility", "") or "")
-                pnp_id = str(getattr(row, "PNPDeviceID", "") or "")[:180]
-                vendor_match = re.search(r"VEN_([0-9A-Fa-f]{4})", pnp_id)
-                device_match = re.search(r"DEV_([0-9A-Fa-f]{4})", pnp_id)
-                vendor_code = vendor_match.group(1).lower() if vendor_match else ""
-                device_code = device_match.group(1).lower() if device_match else ""
-                lowered = vendor_text.casefold() + " " + name.casefold()
-                vendor = "AMD" if vendor_code == "1002" or any(token in lowered for token in ("amd", "advanced micro", "radeon")) else (
-                    "NVIDIA" if vendor_code == "10de" or any(token in lowered for token in ("nvidia", "geforce")) else
-                    "Intel" if vendor_code == "8086" or any(token in lowered for token in ("intel", "arc")) else vendor_text[:80] or "Unknown")
-                if (not name or "basic display adapter" in name.casefold() or name.casefold() == "unknown gpu") and vendor_code and device_code:
-                    name = _pci_device_name("0x" + vendor_code, "0x" + device_code) or name
-                output.append({
-                    "name": name, "vendor": vendor,
-                    "driver_version": str(getattr(row, "DriverVersion", "") or "")[:80] or None,
-                    "device_id": pnp_id or None,
-                    "inventory_status": "Detected",
-                })
-        except Exception:
             pass
-    return output[:16]
+        output.append({
+            "name": model or f"{vendor} graphics adapter",
+            "vendor": vendor,
+            "vendor_id": vendor_id,
+            "device_id": device_id,
+            "subsystem_vendor_id": _read(device / "subsystem_vendor"),
+            "subsystem_device_id": _read(device / "subsystem_device"),
+            "driver": driver,
+            "pci_address": device.name,
+            "inventory_status": "Detected",
+            "inventory_source": "Linux PCI sysfs",
+        })
+        if len(output) >= 32:
+            break
+    return output
+
+
+def _windows_wmi_gpu_inventory() -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    try:
+        import wmi
+        rows = wmi.WMI(namespace=r"root\cimv2").Win32_VideoController()
+        for row in list(rows)[:32]:
+            name = str(getattr(row, "Name", "") or "Display adapter")[:160]
+            vendor_text = str(getattr(row, "AdapterCompatibility", "") or "")
+            pnp_id = str(getattr(row, "PNPDeviceID", "") or "")[:240]
+            vendor_match = re.search(r"VEN_([0-9A-Fa-f]{4})", pnp_id)
+            device_match = re.search(r"DEV_([0-9A-Fa-f]{4})", pnp_id)
+            vendor_code = vendor_match.group(1).lower() if vendor_match else ""
+            device_code = device_match.group(1).lower() if device_match else ""
+            vendor = _classify_gpu_vendor(vendor_code, vendor_text, name)
+            if (not name or "basic display adapter" in name.casefold()
+                    or name.casefold() in {"unknown gpu", "display adapter"}) and vendor_code and device_code:
+                name = _pci_device_name(vendor_code, device_code) or name
+            output.append({
+                "name": name,
+                "vendor": vendor,
+                "vendor_id": vendor_code or None,
+                "device_id": pnp_id or device_code or None,
+                "driver_version": str(getattr(row, "DriverVersion", "") or "")[:80] or None,
+                "inventory_status": "Detected",
+                "inventory_source": "Windows WMI",
+            })
+    except Exception:
+        pass
+    return output
+
+
+def _windows_registry_gpu_inventory() -> list[dict[str, Any]]:
+    """Fallback display-adapter inventory using the built-in Windows device registry."""
+    output: list[dict[str, Any]] = []
+    try:
+        import winreg
+        access = winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0)
+        display_guid = "{4d36e968-e325-11ce-bfc1-08002be10318}"
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Enum\PCI",
+            0,
+            access,
+        ) as root:
+            for vendor_index in range(512):
+                try:
+                    vendor_key_name = winreg.EnumKey(root, vendor_index)
+                except OSError:
+                    break
+                vendor_match = re.search(r"VEN_([0-9A-Fa-f]{4})", vendor_key_name)
+                device_match = re.search(r"DEV_([0-9A-Fa-f]{4})", vendor_key_name)
+                if not vendor_match:
+                    continue
+                vendor_code = vendor_match.group(1).lower()
+                device_code = device_match.group(1).lower() if device_match else ""
+                try:
+                    vendor_key = winreg.OpenKey(root, vendor_key_name, 0, access)
+                except OSError:
+                    continue
+                with vendor_key:
+                    for instance_index in range(64):
+                        try:
+                            instance_name = winreg.EnumKey(vendor_key, instance_index)
+                        except OSError:
+                            break
+                        try:
+                            instance_key = winreg.OpenKey(vendor_key, instance_name, 0, access)
+                        except OSError:
+                            continue
+                        with instance_key:
+                            def query_value(value_name: str):
+                                try:
+                                    return winreg.QueryValueEx(instance_key, value_name)[0]
+                                except OSError:
+                                    return None
+                            class_guid = str(query_value("ClassGUID") or "").casefold()
+                            hardware_ids = query_value("HardwareID") or []
+                            compatible_ids = query_value("CompatibleIDs") or []
+                            id_text = " ".join(str(value) for value in (*hardware_ids, *compatible_ids)).casefold()
+                            is_display = class_guid == display_guid or bool(re.search(r"cc_03", id_text))
+                            if not is_display:
+                                continue
+                            friendly = str(query_value("FriendlyName") or "").strip()
+                            description = str(query_value("DeviceDesc") or "").strip()
+                            name = friendly or (description if description and not description.startswith("@") else "")
+                            vendor = _classify_gpu_vendor(vendor_code, "", name)
+                            output.append({
+                                "name": name[:160] or f"{vendor} graphics adapter",
+                                "vendor": vendor,
+                                "vendor_id": vendor_code,
+                                "device_id": f"PCI\\{vendor_key_name}\\{instance_name}"[:240],
+                                "inventory_status": "Detected",
+                                "inventory_source": "Windows device registry",
+                            })
+                            if len(output) >= 32:
+                                return output
+    except Exception:
+        pass
+    return output
+
+
+def _macos_gpu_inventory() -> list[dict[str, Any]]:
+    """Use macOS's built-in display inventory without invoking a shell."""
+    try:
+        result = subprocess.run(
+            ["/usr/sbin/system_profiler", "SPDisplaysDataType", "-json"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        if result.returncode != 0 or len(result.stdout) > 1_500_000:
+            return []
+        payload = json.loads(result.stdout or "{}")
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        return []
+    output: list[dict[str, Any]] = []
+    rows = payload.get("SPDisplaysDataType", [])
+    if not isinstance(rows, list):
+        return output
+    for row in rows[:32]:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("sppci_model") or row.get("_name") or row.get("spdisplays_chipset_model") or "Display adapter")[:160]
+        vendor_text = str(row.get("spdisplays_vendor") or "")
+        vendor = _classify_gpu_vendor(None, vendor_text, name)
+        output.append({
+            "name": name,
+            "vendor": vendor,
+            "device_id": str(row.get("spdisplays_device-id") or "")[:80] or None,
+            "inventory_status": "Detected",
+            "inventory_source": "macOS system_profiler",
+        })
+    return output
+
+
+def collect_gpu_inventory() -> list[dict[str, Any]]:
+    """Discover GPU/display devices using native OS inventory, regardless of vendor."""
+    system = platform.system()
+    if system == "Linux":
+        devices = _linux_gpu_inventory()
+    elif system == "Windows":
+        devices = _windows_wmi_gpu_inventory()
+        fallback = _windows_registry_gpu_inventory()
+        known_ids = {str(item.get("device_id") or "").casefold() for item in devices}
+        known_names = {str(item.get("name") or "").casefold() for item in devices}
+        for item in fallback:
+            device_id = str(item.get("device_id") or "").casefold()
+            name = str(item.get("name") or "").casefold()
+            if (device_id and device_id in known_ids) or (name and name in known_names):
+                continue
+            devices.append(item)
+            if len(devices) >= 32:
+                break
+    elif system == "Darwin":
+        devices = _macos_gpu_inventory()
+    else:
+        devices = []
+    return devices[:32]
+
+
+def collect_linux_gpu_metrics(
+    inventory: list[dict[str, Any]] | None = None,
+    *,
+    sysfs_root: Path | None = None,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Read generic Linux DRM/sysfs counters when the active driver exposes them."""
+    if platform.system() != "Linux":
+        return {}
+    cards = inventory if inventory is not None else collect_gpu_inventory()
+    output: dict[str, dict[str, dict[str, Any]]] = {}
+
+    def read_number(path: Path) -> float | None:
+        raw = _read(path, 64)
+        if raw is None:
+            return None
+        try:
+            value = float(raw)
+            return value if value == value and abs(value) != float("inf") else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    for card in cards[:32]:
+        address = str(card.get("pci_address") or "")
+        if not address:
+            continue
+        device = (sysfs_root or Path("/sys/bus/pci/devices")) / address
+        metrics: dict[str, dict[str, Any]] = {}
+
+        def add(field: str, value: float | None, unit: str, source: str = "Linux DRM/sysfs") -> None:
+            if value is not None:
+                metrics[field] = {"value": value, "unit": unit, "source": source}
+
+        busy = read_number(device / "gpu_busy_percent")
+        if busy is not None and 0 <= busy <= 100:
+            add("utilization_percent", busy, "%")
+        used = read_number(device / "mem_info_vram_used")
+        total = read_number(device / "mem_info_vram_total")
+        if used is not None and used >= 0:
+            add("memory_used_gb", used / (1024 ** 3), "GiB")
+        if total is not None and total > 0:
+            add("memory_total_gb", total / (1024 ** 3), "GiB")
+        if used is not None and total is not None and total > 0:
+            add("memory_utilization_percent", min(100.0, max(0.0, used / total * 100)), "%")
+
+        try:
+            hwmon_paths = sorted((device / "hwmon").glob("hwmon*"))
+        except OSError:
+            hwmon_paths = []
+        for hwmon in hwmon_paths[:8]:
+            if "temperature_c" not in metrics:
+                for temp_path in sorted(hwmon.glob("temp*_input"))[:16]:
+                    raw = read_number(temp_path)
+                    if raw is not None:
+                        value = raw / 1000.0
+                        if -40 <= value <= 200:
+                            add("temperature_c", value, "°C")
+                            break
+            if "power_w" not in metrics:
+                for power_path in (hwmon / "power1_average", hwmon / "power1_input"):
+                    raw = read_number(power_path)
+                    if raw is not None and raw >= 0:
+                        add("power_w", raw / 1_000_000.0, "W")
+                        break
+            if "graphics_clock_mhz" not in metrics:
+                raw = read_number(hwmon / "freq1_input")
+                if raw is not None and raw >= 0:
+                    add("graphics_clock_mhz", raw / 1_000_000.0, "MHz")
+            if "fan_rpm" not in metrics:
+                raw = read_number(hwmon / "fan1_input")
+                if raw is not None and 0 <= raw <= 100000:
+                    add("fan_rpm", raw, "RPM")
+        if metrics:
+            output[address.casefold()] = metrics
+    return output
+
 
 
 def collect_amd_smi_devices() -> list[dict[str, Any]]:
@@ -163,10 +454,14 @@ def collect_amd_smi_devices() -> list[dict[str, Any]]:
         amdsmi.amdsmi_init()
         initialized = True
         handles = amdsmi.amdsmi_get_processor_handles()
-        for index, handle in enumerate(handles[:16]):
+        for index, handle in enumerate(handles[:32]):
             try:
                 asic = amdsmi.amdsmi_get_gpu_asic_info(handle)
                 name = str(asic.get("market_name") or asic.get("product_name") or f"AMD GPU {index}")
+                try:
+                    pci_address = str(amdsmi.amdsmi_get_gpu_device_bdf(handle) or "").lower() or None
+                except Exception:
+                    pci_address = None
                 vram = amdsmi.amdsmi_get_gpu_vram_usage(handle)
                 activity = amdsmi.amdsmi_get_gpu_activity(handle)
                 power = amdsmi.amdsmi_get_power_info(handle)
@@ -194,6 +489,7 @@ def collect_amd_smi_devices() -> list[dict[str, Any]]:
                     fan_rpm = None
                 output.append({
                     "index": index, "name": name[:160], "vendor": "AMD", "status": "Available",
+                    "pci_address": pci_address, "inventory_source": "AMD SMI",
                     "utilization_percent": reading(activity.get("gfx_activity"), "%"),
                     "memory_utilization_percent": reading(activity.get("umc_activity"), "%"),
                     "memory_used_gb": reading(used / (1024 ** 3) if used is not None else None, "GiB"),
@@ -228,7 +524,7 @@ def collect_lhm_sensors() -> list[dict[str, Any]]:
         result = []
         for sensor in list(provider.Sensor())[:512]:
             kind = str(getattr(sensor, "SensorType", "") or "")
-            if kind not in {"Temperature", "Fan", "Load", "Clock", "Power"}:
+            if kind not in {"Temperature", "Fan", "Load", "Clock", "Power", "Data", "SmallData"}:
                 continue
             try:
                 value = float(sensor.Value)
@@ -236,7 +532,8 @@ def collect_lhm_sensors() -> list[dict[str, Any]]:
                 continue
             result.append({
                 "type": kind, "name": str(getattr(sensor, "Name", "") or "")[:120],
-                "value": value, "hardware": str(getattr(sensor, "Hardware", "") or "")[:160],
+                "value": value, "unit": str(getattr(sensor, "Unit", "") or "")[:24],
+                "hardware": str(getattr(sensor, "Hardware", "") or "")[:160],
                 "hardware_type": str(getattr(sensor, "HardwareType", "") or "")[:80],
             })
         return result

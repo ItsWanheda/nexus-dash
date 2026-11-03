@@ -245,7 +245,7 @@ function renderContent() {
       '<div class="metrics-grid">' +
       metricCard('CPU LOAD', 'cpu-value', '--%', 'cpu-meta', 'CPU cores', 'cpu') +
       metricCard('MEMORY', 'ram-value', '-- / -- GiB', 'ram-meta', 'System RAM', 'ram') +
-      metricCard('GPU MEMORY', 'gpu-value', 'N/A', 'gpu-meta', 'Optional NVIDIA telemetry', 'gpu') +
+      metricCard('GPU MEMORY', 'gpu-value', 'N/A', 'gpu-meta', 'Detected GPU devices', 'gpu') +
       metricCard('NETWORK RATE', 'network-value', '-- / --', 'network-meta', 'Upload / download', 'network') + '</div>' +
       '<div class="content-grid"><section class="panel span-2"><div class="panel-heading"><div><span class="eyebrow">PERFORMANCE</span><h3>CPU utilisation</h3></div><span class="panel-tag">RECENT SAMPLES</span></div><div id="cpu-chart" class="bar-chart" role="img" aria-label="Recent CPU utilisation samples"></div><div class="chart-axis"><span>Older samples</span><span>Latest</span></div></section>' +
       '<section class="panel"><div class="panel-heading"><div><span class="eyebrow">STORAGE</span><h3>System disk</h3></div><span id="disk-percent" class="big-inline">--%</span></div><div class="progress-track"><div id="disk-bar" class="progress-value"></div></div><div id="disk-meta" class="muted">Waiting for data</div><div class="divider"></div><div class="panel-heading compact"><span>Memory pressure</span><strong id="ram-inline">--%</strong></div><div class="progress-track"><div id="ram-bar" class="progress-value"></div></div></section>' +
@@ -317,8 +317,16 @@ function updateDashboard() {
   setText('cpu-meta', data.cpu.cores + ' logical / ' + data.cpu.physical_cores + ' physical cores');
   setText('ram-value', data.ram.used_gb.toFixed(1) + ' / ' + data.ram.total_gb.toFixed(1) + ' GiB');
   setText('ram-meta', data.ram.percent.toFixed(1) + '% utilised');
-  setText('gpu-value', data.gpu.total_gb === null ? 'N/A' : data.gpu.used_gb.toFixed(1) + ' / ' + data.gpu.total_gb.toFixed(1) + ' GiB');
-  setText('gpu-meta', data.gpu.status === 'Available' ? 'NVIDIA memory telemetry' : 'Optional NVIDIA telemetry unavailable');
+  const gpuMemoryAvailable = typeof data.gpu.used_gb === 'number' && typeof data.gpu.total_gb === 'number';
+  setText('gpu-value', gpuMemoryAvailable ? data.gpu.used_gb.toFixed(1) + ' / ' + data.gpu.total_gb.toFixed(1) + ' GiB' : 'N/A');
+  const gpuVendors = Array.isArray(data.gpu.vendors) ? data.gpu.vendors.join(' / ') : '';
+  const gpuCount = Number(data.gpu.device_count || 0);
+  const gpuMeta = gpuMemoryAvailable
+    ? (gpuVendors ? gpuVendors + ' · ' : '') + String(data.gpu.memory_device_count || gpuCount) + ' device(s) reporting memory'
+    : gpuCount
+      ? (gpuVendors ? gpuVendors + ' · ' : '') + String(gpuCount) + ' GPU(s) detected · memory telemetry unavailable'
+      : 'No GPU reported by the system inventory';
+  setText('gpu-meta', gpuMeta);
   setText('network-value', '↑ ' + formatBytesPerSecond(state.networkRates.sent) + ' / ↓ ' + formatBytesPerSecond(state.networkRates.received));
   setText('network-meta', 'Live rate · totals ' + data.network.sent_mb.toFixed(1) + ' / ' + data.network.recv_mb.toFixed(1) + ' MB');
   setText('disk-percent', data.disk.percent.toFixed(1) + '%');

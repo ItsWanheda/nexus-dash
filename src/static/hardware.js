@@ -34,7 +34,7 @@ function renderHardware() {
     '<div class="telemetry-toolbar"><span id="hardware-sampled" class="panel-tag">WAITING FOR SENSOR DATA</span><button class="secondary-button" type="button" data-action="hardware-refresh">↻ Refresh hardware</button></div>' +
     '<div class="telemetry-grid">' +
     '<section class="panel telemetry-panel"><div class="panel-heading"><div><span class="eyebrow">PROCESSOR</span><h3>CPU</h3></div><span id="hardware-cpu-status" class="panel-tag">LOADING</span></div><div id="hardware-cpu-summary" class="telemetry-reading-list"><p class="muted">Collecting CPU readings…</p></div><div class="divider"></div><h4 class="telemetry-subheading">Logical cores</h4><div id="hardware-cores" class="core-grid"><p class="muted">Waiting for core readings…</p></div><div class="divider"></div><h4 class="telemetry-subheading">CPU temperature sensors</h4><div id="hardware-cpu-temperatures"><p class="muted">Waiting for sensors…</p></div></section>' +
-    '<section class="panel telemetry-panel"><div class="panel-heading"><div><span class="eyebrow">GRAPHICS</span><h3>GPU devices</h3></div><span id="hardware-gpu-status" class="panel-tag">LOADING</span></div><div id="hardware-gpu"><p class="muted">Querying optional GPU providers…</p></div></section>' +
+    '<section class="panel telemetry-panel"><div class="panel-heading"><div><span class="eyebrow">GRAPHICS</span><h3>GPU devices</h3></div><span id="hardware-gpu-status" class="panel-tag">LOADING</span></div><div id="hardware-gpu"><p class="muted">Enumerating display adapters and available sensor providers…</p></div></section>' +
     '<section class="panel telemetry-panel"><div class="panel-heading"><div><span class="eyebrow">SYSTEM MEMORY</span><h3>RAM and pagefile</h3></div><span id="hardware-memory-status" class="panel-tag">LOADING</span></div><div id="hardware-memory" class="telemetry-reading-list"><p class="muted">Collecting memory readings…</p></div></section>' +
     '<section class="panel telemetry-panel"><div class="panel-heading"><div><span class="eyebrow">BOARD SENSORS</span><h3>Motherboard and cooling</h3></div><span id="hardware-board-status" class="panel-tag">LOADING</span></div><h4 class="telemetry-subheading">System and board identity</h4><div id="hardware-system-identity" class="telemetry-reading-list"><p class="muted">Reading SMBIOS / DMI…</p></div><div class="divider"></div><h4 class="telemetry-subheading">Temperatures</h4><div id="hardware-board-temperatures"></div><div class="divider"></div><h4 class="telemetry-subheading">Fan speeds</h4><div id="hardware-fans"></div><p class="table-note">Sensor visibility depends on firmware, drivers, permissions, and the platform.</p></section>' +
     '<section class="panel telemetry-panel"><div class="panel-heading"><div><span class="eyebrow">PORTABLE POWER</span><h3>Battery</h3></div><span id="hardware-battery-status" class="panel-tag">LOADING</span></div><div id="hardware-battery" class="telemetry-reading-list"><p class="muted">Checking battery telemetry…</p></div></section>' +
@@ -78,7 +78,9 @@ async function loadHardware() {
           return '<article class="hardware-device"><div class="panel-heading compact"><strong>' + escapeHTML(device.name || 'GPU device') +
             '</strong>' + hardwareStatus(device.status) + '</div><div class="hardware-device-meta"><span>' + escapeHTML(device.vendor || 'Unknown vendor') + '</span>' +
             (device.device_id ? '<span>Device ' + escapeHTML(device.device_id) + '</span>' : '') +
-            (device.driver_version ? '<span>Driver ' + escapeHTML(device.driver_version) + '</span>' : '') +
+            (device.driver ? '<span>Driver ' + escapeHTML(device.driver) + '</span>' : '') +
+            (device.driver_version ? '<span>Driver version ' + escapeHTML(device.driver_version) + '</span>' : '') +
+            (device.vendor_id ? '<span>Vendor ID ' + escapeHTML(device.vendor_id) + '</span>' : '') +
             (device.pci_address ? '<span>PCI ' + escapeHTML(device.pci_address) + '</span>' : '') + '</div><div class="telemetry-reading-list">' +
             hardwareReadingRow('GPU utilisation', device.utilization_percent) +
             hardwareReadingRow('VRAM used', device.memory_used_gb) +
@@ -91,7 +93,7 @@ async function loadHardware() {
             hardwareReadingRow('Fan tachometer', device.fan_rpm) + '</div>' +
             (device.reason ? '<p class="table-note">' + escapeHTML(device.reason) + '</p>' : '') + '</article>';
         }).join('')
-      : '<p class="empty-state">' + escapeHTML(gpu.reason || 'NVIDIA telemetry unavailable. Install a compatible driver and optional NVML package for NVIDIA readings.') + '</p>';
+      : '<p class="empty-state">' + escapeHTML(gpu.reason || 'No display adapter was reported by the available operating-system inventory providers.') + '</p>';
     const memory = payload.memory || {};
     setText('hardware-memory-status', memory.percent && memory.percent.status || 'Unavailable');
     const swap = memory.swap || {};

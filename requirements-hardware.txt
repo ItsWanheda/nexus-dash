@@ -1,7 +1,9 @@
-# Optional hardware telemetry providers. Install only when required.
+# Optional live-telemetry providers. GPU inventory uses native OS interfaces and
+# does not depend on installing a vendor-specific Python package.
+# NVIDIA-only live metrics through NVML; safe to omit for AMD/Intel/other GPUs.
 nvidia-ml-py>=12.0.0
 wmi>=1.5.1; platform_system == "Windows"
 pywin32>=306; platform_system == "Windows"
 
-# Optional AMD SMI for supported Linux AMDGPU/ROCm systems.
+# Optional AMD live metrics for supported Linux AMDGPU/ROCm systems; not required for AMD detection.
 amdsmi>=27.1.0; platform_system == "Linux"

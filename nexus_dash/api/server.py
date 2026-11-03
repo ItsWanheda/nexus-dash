@@ -28,7 +28,7 @@ from starlette.responses import JSONResponse, Response
 
 from nexus_dash.services.telemetry_store import SAMPLE_FIELDS, WINDOW_SECONDS, TelemetryStore
 from nexus_dash.services.diagnostics import DIAGNOSTICS_VERSION, ProcessMemoryTracker, analyse_diagnostics, collect_os_events
-from nexus_dash.services.hardware import collect_hardware
+from nexus_dash.services.hardware import collect_hardware, collect_gpu_memory_summary
 from nexus_dash.services.storage_metrics import StorageSampler
 from nexus_dash.services.process_intelligence import ProcessIntelligence
 from nexus_dash.services.settings_store import SettingsStore
@@ -46,7 +46,6 @@ ALLOWED_ORIGINS = {
     "http://127.0.0.1:8000", "http://localhost:8000",
 }
 PROTECTED_PIDS = {0, 1, 2, 3, 4, os.getpid(), os.getppid()}
-_NVML_INITIALIZED = False
 
 TELEMETRY_STORE = TelemetryStore()
 PROCESS_MEMORY_TRACKER = ProcessMemoryTracker()
@@ -133,17 +132,9 @@ def _format_uptime(seconds: float) -> str:
 
 
 def _gpu_memory() -> dict[str, Any]:
-    global _NVML_INITIALIZED
-    try:
-        import pynvml  # optional package: nvidia-ml-py
-        if not _NVML_INITIALIZED:
-            pynvml.nvmlInit()
-            _NVML_INITIALIZED = True
-        info = pynvml.nvmlDeviceGetMemoryInfo(pynvml.nvmlDeviceGetHandleByIndex(0))
-        return {"used_gb": round(info.used / (1024 ** 3), 2),
-                "total_gb": round(info.total / (1024 ** 3), 2), "status": "Available"}
-    except Exception:
-        return {"used_gb": None, "total_gb": None, "status": "Unavailable"}
+    """Return GPU memory totals across detected vendors and installed telemetry providers."""
+    return collect_gpu_memory_summary()
+
 
 
 def _same_user(process: psutil.Process) -> bool:
